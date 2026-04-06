@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional, Sequence, Tuple, Dict, Any
+import math
+import numpy as np
+
+
+@dataclass(frozen=True)
+class Layer:
+    """1D longitudinal layer.
+
+    Parameters
+    ----------
+    thickness:
+        Layer thickness h [m].
+    density:
+        Mass density rho [kg/m^3].
+    young_modulus:
+        1D effective longitudinal modulus E [Pa].
+    name:
+        Optional label.
+    """
+
+    thickness: float
+    density: float
+    young_modulus: float
+    name: str = ""
+
+    @property
+    def wave_speed(self) -> float:
+        return math.sqrt(self.young_modulus / self.density)
+
+    @property
+    def impedance(self) -> float:
+        return self.density * self.wave_speed
+
+    def wavenumber(self, omega: float) -> complex:
+        return omega / self.wave_speed
+
+    def dynamic_stiffness(self, omega: float) -> np.ndarray:
+        """Return the 2x2 dynamic stiffness matrix of the layer.
+
+        Port convention:
+        - displacement positive along +z
+        - port force is the force applied *to the object* by the exterior,
+          positive along +z
+        """
+        k = self.wavenumber(omega)
+        kh = k * self.thickness
+        z = self.impedance
+        s = np.sin(kh)
+        c = np.cos(kh)
+
+        if abs(s) < 1e-14:
+            # Avoid a hard crash at exact poles. The response is singular there;
+            # the small complex perturbation regularizes the algebra numerically.
+            kh = kh + 1e-12j
+            s = np.sin(kh)
+            c = np.cos(kh)
+
+        cot = c / s
+        csc = 1.0 / s
+        return omega * z * np.array(
+            [[cot, -csc], [-csc, cot]], dtype=complex
+        )
+
+    def q_from_amplitudes(self, omega: float, a_plus: complex, a_minus: complex) -> np.ndarray:
+        k = self.wavenumber(omega)
+        e = np.exp(1j * k * self.thickness)
+        return np.array([a_plus + a_minus, a_plus * e + a_minus / e], dtype=complex)
+
+    def amplitudes_from_boundary_displacements(self, omega: float, u_left: complex, u_right: complex) -> Tuple[complex, complex]:
+        k = self.wavenumber(omega)
+        e = np.exp(1j * k * self.thickness)
+        d = np.array([[1.0, 1.0], [e, 1.0 / e]], dtype=complex)
+        a_plus, a_minus = np.linalg.solve(d, np.array([u_left, u_right], dtype=complex))
+        return a_plus, a_minus
+
+    def field(self, omega: float, z_local: np.ndarray, u_left: complex, u_right: complex) -> Dict[str, np.ndarray]:
+        """Recover displacement, stress, and particle velocity inside the layer."""
+        a_plus, a_minus = self.amplitudes_from_boundary_displacements(omega, u_left, u_right)
+        k = self.wavenumber(omega)
+        z = self.impedance
+        z_local = np.asarray(z_local, dtype=float)
+        phase_p = np.exp(1j * k * z_local)
+        phase_m = np.exp(-1j * k * z_local)
+        u = a_plus * phase_p + a_minus * phase_m
+        sigma = 1j * omega * z * (a_plus * phase_p - a_minus * phase_m)
+        velocity = -1j * omega * u
+        return {
+            "z": z_local,
+            "u": u,
+            "sigma": sigma,
+            "velocity": velocity,
+            "a_plus": np.full_like(z_local, a_plus, dtype=complex),
+            "a_minus": np.full_like(z_local, a_minus, dtype=complex),
+        }
+
+
+@dataclass(frozen=True)
+class InterfaceSpring:
+    """Zero-thickness normal spring interface.
+
+    If stiffness is None or math.inf, the interface is treated as perfectly bonded.
+    """
+
+    stiffness: Optional[float] = None
+    name: str = ""
+
+    @property
+    def is_perfect(self) -> bool:
+        return self.stiffness is None or math.isinf(self.stiffness)
+
+    def dynamic_stiffness(self) -> np.ndarray:
+        if self.is_perfect:
+            raise ValueError("Perfect interface has no explicit 2x2 spring matrix.")
+        k = float(self.stiffness)
+        return k * np.array([[1.0, -1.0], [-1.0, 1.0]], dtype=complex)
+
+
+class LaminatedStack:
+    """1D laminated stack with optional zero-thickness spring interfaces."""
+
+    def __init__(self, layers: Sequence[Layer], interfaces: Optional[Sequence[InterfaceSpring]] = None):
+        if len(layers) == 0:
+            raise ValueError("At least one layer is required.")
+        self.layers: List[Layer] = list(layers)
+        if interfaces is None:
+            interfaces = [InterfaceSpring(None, name=f"perfect_{i}") for i in range(len(layers) - 1)]
+        if len(interfaces) != len(layers) - 1:
+            raise ValueError("interfaces length must equal len(layers) - 1.")
+        self.interfaces: List[InterfaceSpring] = list(interfaces)
+
+        self._connectivity: Dict[str, Any] = self._build_connectivity()
+
+    def _build_connectivity(self) -> Dict[str, Any]:
+        layer_dofs: List[Tuple[int, int]] = []
+        spring_dofs: List[Optional[Tuple[int, int]]] = [None] * (len(self.layers) - 1)
+        node_positions: List[float] = [0.0]
+        node_labels: List[str] = ["x0"]
+
+        current_left = 0
+        x = 0.0
+        next_node = 1
+
+        for j, layer in enumerate(self.layers):
+            # Create right node for this layer.
+            if j == len(self.layers) - 1:
+                right_node = next_node
+                next_node += 1
+                x += layer.thickness
+                node_positions.append(x)
+                node_labels.append(f"x{len(node_positions)-1}")
+            else:
+                x += layer.thickness
+                interface = self.interfaces[j]
+                if interface.is_perfect:
+                    right_node = next_node
+                    next_node += 1
+                    node_positions.append(x)
+                    node_labels.append(f"x{len(node_positions)-1}")
+                    next_left = right_node
+                else:
+                    right_node = next_node
+                    next_node += 1
+                    node_positions.append(x)
+                    node_labels.append(f"x{len(node_positions)-1}L")
+                    next_left = next_node
+                    next_node += 1
+                    node_positions.append(x)
+                    node_labels.append(f"x{len(node_positions)-1}R")
+                    spring_dofs[j] = (right_node, next_left)
+                layer_dofs.append((current_left, right_node))
+                current_left = next_left
+                continue
+
+            layer_dofs.append((current_left, right_node))
+            current_left = right_node
+
+        interface_jump_nodes: List[Optional[Tuple[int, int]]] = spring_dofs
+
+        return {
+            "num_dofs": next_node,
+            "layer_dofs": layer_dofs,
+            "spring_dofs": spring_dofs,
+            "interface_jump_nodes": interface_jump_nodes,
+            "node_positions": np.array(node_positions, dtype=float),
+            "node_labels": node_labels,
+        }
+
+    @property
+    def num_dofs(self) -> int:
+        return int(self._connectivity["num_dofs"])
+
+    @property
+    def node_positions(self) -> np.ndarray:
+        return self._connectivity["node_positions"].copy()
+
+    @property
+    def node_labels(self) -> List[str]:
+        return list(self._connectivity["node_labels"])
+
+    def assemble_structure_matrix(self, omega: float) -> np.ndarray:
+        k_global = np.zeros((self.num_dofs, self.num_dofs), dtype=complex)
+
+        for layer, (i, j) in zip(self.layers, self._connectivity["layer_dofs"]):
+            k_local = layer.dynamic_stiffness(omega)
+            idx = np.ix_([i, j], [i, j])
+            k_global[idx] += k_local
+
+        for interface, dofs in zip(self.interfaces, self._connectivity["spring_dofs"]):
+            if dofs is None:
+                continue
+            i, j = dofs
+            k_local = interface.dynamic_stiffness()
+            idx = np.ix_([i, j], [i, j])
+            k_global[idx] += k_local
+
+        return k_global
+
+    def solve_frequency_point(
+        self,
+        frequency_hz: float,
+        left_medium_impedance: float,
+        right_medium_impedance: float,
+        incident_displacement_amplitude: complex = 1.0,
+    ) -> Dict[str, Any]:
+        """Solve one frequency point.
+
+        Boundary model:
+        - left medium: semi-infinite, one incoming wave + one reflected wave
+        - right medium: semi-infinite, outgoing transmitted wave only
+        """
+        omega = 2.0 * math.pi * frequency_hz
+        k_struct = self.assemble_structure_matrix(omega)
+        k_total = k_struct.copy()
+        rhs = np.zeros(self.num_dofs, dtype=complex)
+
+        # Semi-infinite boundary impedances under the adopted port-force convention.
+        k_total[0, 0] += 1j * omega * left_medium_impedance
+        k_total[-1, -1] += 1j * omega * right_medium_impedance
+        rhs[0] += 2j * omega * left_medium_impedance * incident_displacement_amplitude
+
+        u = np.linalg.solve(k_total, rhs)
+
+        u_left = u[0]
+        u_right = u[-1]
+        a_inc = incident_displacement_amplitude
+        a_ref = u_left - a_inc
+        a_tr = u_right
+        reflection_coefficient = a_ref / a_inc
+        transmission_displacement_ratio = a_tr / a_inc
+
+        velocity_left = -1j * omega * u_left
+        force_left = 1j * omega * left_medium_impedance * u_left - 2j * omega * left_medium_impedance * a_inc
+        input_impedance = np.inf if abs(velocity_left) == 0 else force_left / velocity_left
+
+        interface_jumps: List[complex] = []
+        for dofs in self._connectivity["interface_jump_nodes"]:
+            if dofs is None:
+                interface_jumps.append(0.0 + 0.0j)
+            else:
+                i, j = dofs
+                interface_jumps.append(u[j] - u[i])
+
+        return {
+            "frequency_hz": frequency_hz,
+            "omega": omega,
+            "u": u,
+            "reflection_coefficient": reflection_coefficient,
+            "transmission_displacement_ratio": transmission_displacement_ratio,
+            "input_impedance": input_impedance,
+            "interface_jumps": np.array(interface_jumps, dtype=complex),
+            "global_matrix": k_total,
+            "rhs": rhs,
+            "node_positions": self.node_positions,
+            "node_labels": self.node_labels,
+        }
+
+    def solve_sweep(
+        self,
+        frequencies_hz: Sequence[float],
+        left_medium_impedance: float,
+        right_medium_impedance: float,
+        incident_displacement_amplitude: complex = 1.0,
+    ) -> "FrequencyResponseResult":
+        from .solver import FrequencyResponseResult
+
+        freqs = np.asarray(frequencies_hz, dtype=float)
+        solutions = [
+            self.solve_frequency_point(
+                float(f),
+                left_medium_impedance=left_medium_impedance,
+                right_medium_impedance=right_medium_impedance,
+                incident_displacement_amplitude=incident_displacement_amplitude,
+            )
+            for f in freqs
+        ]
+        return FrequencyResponseResult.from_solutions(self, freqs, solutions)

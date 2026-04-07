@@ -56,7 +56,7 @@ class FrequencyResponseResult:
 
     def layer_field(self, layer_index: int, frequency_index: int, points: int = 200) -> Dict[str, np.ndarray]:
         layer = self.stack.layers[layer_index]
-        dof_left, dof_right = self.stack._connectivity["layer_dofs"][layer_index]
+        dof_left, dof_right = self.stack._connectivity.layer_dofs[layer_index]
         u_left = self.nodal_displacements[frequency_index, dof_left]
         u_right = self.nodal_displacements[frequency_index, dof_right]
         z_local = np.linspace(0.0, layer.thickness, points)

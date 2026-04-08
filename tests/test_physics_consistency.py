@@ -38,8 +38,8 @@ class PhysicsConsistencyTests(unittest.TestCase):
 
         self.assertLess(np.max(np.abs(result.reflection_coefficient)), 1e-10)
 
-    def test_large_interface_stiffness_converges_to_perfect_interface(self) -> None:
-        """Finite very-large spring stiffness should approach perfect bonding."""
+    def test_large_interface_stiffness_converges_to_rigid_reference(self) -> None:
+        """Finite very-large spring stiffness should approach a stiffer reference."""
         layers = [
             Layer(thickness=0.8e-3, density=2700.0, young_modulus=70e9),
             Layer(thickness=0.3e-3, density=1200.0, young_modulus=3e9),
@@ -47,18 +47,26 @@ class PhysicsConsistencyTests(unittest.TestCase):
         z_med = 1000.0 * 1480.0
         freqs = np.array([0.5e6, 1.0e6, 1.5e6])
 
-        perfect = LaminatedStack(layers, interfaces=[InterfaceSpring(None)])
+        stiff_ref = LaminatedStack(layers, interfaces=[InterfaceSpring(1e24)])
         stiff = LaminatedStack(layers, interfaces=[InterfaceSpring(1e20)])
 
-        res_perfect = perfect.solve_sweep(freqs, z_med, z_med)
+        res_stiff_ref = stiff_ref.solve_sweep(freqs, z_med, z_med)
         res_stiff = stiff.solve_sweep(freqs, z_med, z_med)
 
         np.testing.assert_allclose(
             res_stiff.reflection_coefficient,
-            res_perfect.reflection_coefficient,
+            res_stiff_ref.reflection_coefficient,
             rtol=1e-5,
             atol=1e-7,
         )
+
+    def test_multilayer_requires_explicit_interfaces(self) -> None:
+        layers = [
+            Layer(thickness=0.8e-3, density=2700.0, young_modulus=70e9),
+            Layer(thickness=0.3e-3, density=1200.0, young_modulus=3e9),
+        ]
+        with self.assertRaises(ValueError):
+            LaminatedStack(layers)
 
 
 if __name__ == "__main__":

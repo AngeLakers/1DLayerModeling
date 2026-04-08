@@ -100,21 +100,18 @@ class Layer:
 
 @dataclass(frozen=True)
 class InterfaceSpring:
-    """Zero-thickness normal spring interface.
+    """Zero-thickness normal spring interface with explicit finite stiffness."""
 
-    If stiffness is None or math.inf, the interface is treated as perfectly bonded.
-    """
-
-    stiffness: Optional[float] = None
+    stiffness: float
     name: str = ""
 
-    @property
-    def is_perfect(self) -> bool:
-        return self.stiffness is None or math.isinf(self.stiffness)
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.stiffness):
+            raise ValueError("Interface stiffness must be finite.")
+        if self.stiffness <= 0:
+            raise ValueError("Interface stiffness must be positive.")
 
     def dynamic_stiffness(self) -> np.ndarray:
-        if self.is_perfect:
-            raise ValueError("Perfect interface has no explicit 2x2 spring matrix.")
         k = float(self.stiffness)
         return k * np.array([[1.0, -1.0], [-1.0, 1.0]], dtype=complex)
 
@@ -125,21 +122,23 @@ class Connectivity:
 
     num_dofs: int
     layer_dofs: List[Tuple[int, int]]
-    spring_dofs: List[Optional[Tuple[int, int]]]
-    interface_jump_nodes: List[Optional[Tuple[int, int]]]
+    spring_dofs: List[Tuple[int, int]]
+    interface_jump_nodes: List[Tuple[int, int]]
     node_positions: np.ndarray
     node_labels: List[str]
 
 
 class LaminatedStack:
-    """1D laminated stack with optional zero-thickness spring interfaces."""
+    """1D laminated stack with explicit zero-thickness spring interfaces."""
 
     def __init__(self, layers: Sequence[Layer], interfaces: Optional[Sequence[InterfaceSpring]] = None):
         if len(layers) == 0:
             raise ValueError("At least one layer is required.")
         self.layers: List[Layer] = list(layers)
         if interfaces is None:
-            interfaces = [InterfaceSpring(None, name=f"perfect_{i}") for i in range(len(layers) - 1)]
+            interfaces = []
+        if len(self.layers) > 1 and len(interfaces) == 0:
+            raise ValueError("Explicit interfaces are required when len(layers) > 1.")
         if len(interfaces) != len(layers) - 1:
             raise ValueError("interfaces length must equal len(layers) - 1.")
         self.interfaces: List[InterfaceSpring] = list(interfaces)
@@ -148,7 +147,7 @@ class LaminatedStack:
 
     def _build_connectivity(self) -> Connectivity:
         layer_dofs: List[Tuple[int, int]] = []
-        spring_dofs: List[Optional[Tuple[int, int]]] = [None] * (len(self.layers) - 1)
+        spring_dofs: List[Tuple[int, int]] = []
         node_positions: List[float] = [0.0]
         node_labels: List[str] = ["x0"]
 
@@ -166,23 +165,15 @@ class LaminatedStack:
                 node_labels.append(f"x{len(node_positions)-1}")
             else:
                 x += layer.thickness
-                interface = self.interfaces[j]
-                if interface.is_perfect:
-                    right_node = next_node
-                    next_node += 1
-                    node_positions.append(x)
-                    node_labels.append(f"x{len(node_positions)-1}")
-                    next_left = right_node
-                else:
-                    right_node = next_node
-                    next_node += 1
-                    node_positions.append(x)
-                    node_labels.append(f"x{len(node_positions)-1}L")
-                    next_left = next_node
-                    next_node += 1
-                    node_positions.append(x)
-                    node_labels.append(f"x{len(node_positions)-1}R")
-                    spring_dofs[j] = (right_node, next_left)
+                right_node = next_node
+                next_node += 1
+                node_positions.append(x)
+                node_labels.append(f"x{len(node_positions)-1}L")
+                next_left = next_node
+                next_node += 1
+                node_positions.append(x)
+                node_labels.append(f"x{len(node_positions)-1}R")
+                spring_dofs.append((right_node, next_left))
                 layer_dofs.append((current_left, right_node))
                 current_left = next_left
                 continue
@@ -222,8 +213,6 @@ class LaminatedStack:
             self._scatter_add_2x2(k_global, layer.dynamic_stiffness(omega), i, j)
 
         for interface, dofs in zip(self.interfaces, self._connectivity.spring_dofs):
-            if dofs is None:
-                continue
             i, j = dofs
             self._scatter_add_2x2(k_global, interface.dynamic_stiffness(), i, j)
 
@@ -267,11 +256,8 @@ class LaminatedStack:
     def _compute_interface_jumps(self, u: np.ndarray) -> np.ndarray:
         interface_jumps: List[complex] = []
         for dofs in self._connectivity.interface_jump_nodes:
-            if dofs is None:
-                interface_jumps.append(0.0 + 0.0j)
-            else:
-                i, j = dofs
-                interface_jumps.append(u[j] - u[i])
+            i, j = dofs
+            interface_jumps.append(u[j] - u[i])
         return np.array(interface_jumps, dtype=complex)
 
     def solve_frequency_point(

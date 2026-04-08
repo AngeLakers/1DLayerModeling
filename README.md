@@ -1,158 +1,297 @@
 # 1DLayerModeling
 
-用于**一维法向入射层状结构**（多层材料 + 零厚度界面弹簧）的频域建模工具。当前实现基于动态刚度法（dynamic stiffness method），可计算：
+用于**一维法向入射层状结构**（多层材料 + 零厚度界面弹簧）的频域前向建模工具。当前实现基于**动态刚度法**（dynamic stiffness method），重点面向：
+
+- 有限厚度多层结构的 1D 法向纵波响应
+- 界面法向弹簧刚度对频谱的影响
+- 左右半无限介质端接条件下的反射 / 透射 / 输入阻抗计算
+
+当前版本可输出：
 
 - 节点位移响应
-- 反射系数与透射位移比
-- 输入阻抗
-- 界面位移跳量（imperfect interface 开裂/滑移表征）
+- 反射系数 `R(ω)`
+- 透射位移比 `T_u(ω)`
+- 输入阻抗 `Z_in(ω)`
+- 界面位移跳量 `Δu(ω)`
+- 无耗实阻抗边界下的功率反射率 / 透射率 / 功率平衡
 
 ---
 
-## 1. 物理模型与刚度矩阵逻辑
+## 1. 物理模型与边界定义
 
-### 1.1 单层（Layer）动态刚度
+### 1.1 单层（`Layer`）动态刚度
 
-对每一层（厚度 `h`，密度 `ρ`，模量 `E`），采用 1D 纵向波模型：
+对每一层（厚度 `h`，密度 `ρ`，等效纵向模量 `E`），采用 1D 纵向波模型：
 
 - 波速：`c = sqrt(E / ρ)`
 - 波阻抗：`Z = ρ c`
 - 波数：`k = ω / c`
 
-层两端位移自由度为 `u_L, u_R`，在当前端口力约定下，单层 2×2 动态刚度矩阵为：
+层两端位移自由度为 `u_L, u_R`。在当前端口力约定下，单层 2×2 动态刚度矩阵为：
 
 `K_layer = ω Z [[cot(kh), -csc(kh)], [-csc(kh), cot(kh)]]`
 
-代码中在 `sin(kh)` 过小（共振奇点附近）时加入微小复扰动，避免数值崩溃，但不改变基本物理关系。  
+当 `sin(kh)` 在共振奇点附近过小时，代码会加入极小复扰动以保持数值可解。该处理是**数值正则化**，不是物理损耗模型。
 
-### 1.2 界面弹簧（InterfaceSpring）
+### 1.2 界面弹簧（`InterfaceSpring`）
 
-若界面法向刚度为 `K_int`（N/m³ 的等效离散形式，具体量纲依建模标定），其 2×2 刚度矩阵：
+当前 `main` 分支采用**显式有限刚度界面**。若界面法向刚度为 `K_int`，其 2×2 刚度矩阵为：
 
 `K_spring = K_int [[1, -1], [-1, 1]]`
 
-- `stiffness=None` 或 `inf`：视为完美粘接（无额外 DOF、无显式弹簧矩阵）
-- 有限刚度：在界面两侧拆分为 `L/R` 两个节点，通过弹簧连接
+注意：
 
-### 1.3 全局装配
+- 当前代码要求多层结构显式传入 `len(layers) - 1` 个有限界面弹簧。
+- 当前 `main` 不再支持用 `None / inf` 表示 perfect interface。
+- 若要逼近刚接，可使用足够大的有限刚度，并通过测试检查收敛。
 
-`LaminatedStack` 中全局矩阵装配分两步：
+### 1.3 结构本体矩阵与端接矩阵
 
-1. 累加每一层 `K_layer`
-2. 对非完美界面累加 `K_spring`
+`LaminatedStack.assemble_structure_matrix(ω)` 返回的是**结构本体**的全局动态刚度矩阵 `K_struct(ω)`，尚未接入左右半空间。
 
-通过 `_scatter_add_2x2` 统一执行局部 2×2 到全局矩阵的散装配（scatter-add），后续扩展更清晰。
-
-### 1.4 边界条件（半无限介质辐射边界）
-
-在结构左右端引入外介质阻抗 `Z_left, Z_right`：
+之后再施加左右端接：
 
 - `K[0,0] += iωZ_left`
 - `K[-1,-1] += iωZ_right`
-
-左侧给定入射位移振幅 `a_inc` 时，右端无入射，仅左端激励项：
-
 - `rhs[0] += 2 iω Z_left a_inc`
 
-求解线性方程后：
+因此当前求解得到的 `R / T_u / Z_in` 是：
 
-- 反射：`R = (u_left - a_inc) / a_inc`
-- 透射位移比：`T_u = u_right / a_inc`
-- 输入阻抗：由左端力/速度比定义
+**“有限层状体 + 左右半无限介质端接” 的加载后响应**，不是裸系统本征谱。
+
+### 1.4 端口参考面在哪里
+
+左端输出是定义在：
+
+**左半空间与第一层左表面的交界面**
+
+右端输出是定义在：
+
+**最后一层右表面与右半空间的交界面**
+
+所以：
+
+- `u[0]` 是左边界面位移
+- `R = (u_left - a_inc) / a_inc` 是左半空间端口处的反射系数
+- `T_u = u_right / a_inc` 是右端口处的透射位移比
+
+它们都不是半空间内部远场探头信号，而是**端口面量**。
 
 ---
 
-## 2. 代码结构（已为后续扩展整理）
+## 2. 左右半空间介质的自定义
 
-### 2.1 关键模块
+### 2.1 `HalfSpaceMedium`
 
+新增了 `HalfSpaceMedium` 类型，用来显式描述左右半空间端接介质。可用两种方式定义：
+
+1. 通过 `density + wave_speed`
+2. 直接给定 `acoustic_impedance`
+
+示例：
+
+```python
+from layered1d import HalfSpaceMedium
+
+water = HalfSpaceMedium(density=1000.0, wave_speed=1480.0, name="Water")
+steel = HalfSpaceMedium(density=7850.0, wave_speed=5900.0, name="Steel")
+# 或者
+water_eq = HalfSpaceMedium.from_impedance(1000.0 * 1480.0, name="Water-equivalent")
+```
+
+### 2.2 兼容旧接口
+
+`solve_frequency_point()` 与 `solve_sweep()` 保留了原有的标量阻抗接口：
+
+```python
+result = stack.solve_sweep(freqs, left_medium_impedance=1.48e6, right_medium_impedance=4.63e7)
+```
+
+同时也支持更清晰的介质对象接口：
+
+```python
+result = stack.solve_sweep(freqs, left_medium=water, right_medium=steel)
+```
+
+两种接口只能二选一。代码内部会解析出对应端口阻抗。
+
+---
+
+## 3. 代码结构
+
+### 3.1 当前模块
+
+- `layered1d/media.py`
+  - `HalfSpaceMedium`：左右半空间介质定义与阻抗解析
 - `layered1d/model.py`
-  - `Layer`：层材料与场恢复
-  - `InterfaceSpring`：界面弹簧
-  - `Connectivity`：DOF 拓扑/节点信息
-  - `LaminatedStack`：装配与求解主流程
+  - `Layer`：层材料与层内场恢复
+  - `InterfaceSpring`：零厚度法向弹簧界面
+  - `Connectivity`：DOF 拓扑
+  - `LaminatedStack`：结构装配、边界施加、单频/扫频求解
 - `layered1d/solver.py`
   - `FrequencyResponseResult`：扫频结果容器与后处理
 - `examples/basic_demo.py`
-  - 三层结构 + 多组界面刚度样例
+  - 三层结构 + 可自定义左右半空间示例
+- `tests/test_physics_consistency.py`
+  - 物理一致性与边界接口测试
 
-### 2.2 重构后的职责分离（不改变物理逻辑）
+### 3.2 当前职责分层
 
-`LaminatedStack` 内部已按“可插拔”流程拆分：
+`LaminatedStack` 目前已拆分为：
 
 - `_build_connectivity()`：建立 DOF/节点拓扑
-- `assemble_structure_matrix()`：结构本体矩阵
-- `_apply_boundary_conditions()`：外介质辐射边界 + 激励
-- `_recover_scattering_outputs()`：反射/透射/输入阻抗恢复
-- `_compute_interface_jumps()`：界面位移跳量
-- `solve_frequency_point()`：单频调度
-- `solve_sweep()`：扫频调度
+- `assemble_structure_matrix()`：仅装配结构本体矩阵
+- `_apply_boundary_conditions()`：施加左右半空间端接与左入射激励
+- `_recover_scattering_outputs()`：恢复 `R / T_u / Z_in`
+- `_compute_interface_jumps()`：提取界面位移跳量
+- `solve_frequency_point()`：单频求解
+- `solve_sweep()`：扫频求解
 
-这种结构便于后续加入：
-
-- 新界面模型（粘弹、频散、非线性线性化）
-- 新边界模型（刚性端、自由端、阻抗频变）
-- 额外输出（能流、吸收系数、层内应力峰值）
+这种拆法已经具备继续演化为“对象层 + 端接层”的基础。
 
 ---
 
-## 3. 快速开始
+## 4. 快速开始
 
-### 3.1 安装
+### 4.1 安装
 
 ```bash
 pip install -e .
 ```
 
-### 3.2 运行示例
+### 4.2 运行示例
 
 ```bash
 python examples/basic_demo.py
 ```
 
-示例会在 `examples/outputs/<timestamp>/` 下生成反射与输入阻抗对比图。
+示例会在 `examples/outputs/<timestamp>/` 下生成：
+
+- `reflection_magnitude_comparison.png`
+- `input_impedance_comparison.png`
+
+当前示例显式创建左右半空间：
+
+```python
+left_medium = HalfSpaceMedium(density=1000.0, wave_speed=1480.0, name="Water")
+right_medium = HalfSpaceMedium(density=7850.0, wave_speed=5900.0, name="Steel")
+```
 
 ---
 
-## 4. 二次开发建议
+## 5. 结果对象与后处理
 
-1. **新增物理元件**：优先实现“局部 2×2 元件矩阵 + DOF 映射”，再接入装配。  
-2. **保持端口符号约定一致**：位移、力方向与边界激励项必须统一。  
-3. **频率相关参数**：若 `E(ω)` 或 `K_int(ω)` 频变，可在对应类中增加 `dynamic_stiffness(omega)` 的频散版本。  
-4. **数值稳定性**：在奇点附近建议保留微扰/正则化策略。  
+`solve_sweep()` 返回 `FrequencyResponseResult`，包含：
+
+- `reflection_coefficient`
+- `transmission_displacement_ratio`
+- `input_impedance`
+- `interface_jumps`
+- `left_boundary_impedance`
+- `right_boundary_impedance`
+
+并提供便捷属性：
+
+- `reflection_magnitude`
+- `reflection_phase`
+- `input_impedance_magnitude`
+- `interface_jump_magnitude`
+- `power_reflectance`
+- `power_transmittance`
+- `power_balance`
+
+其中：
+
+`power_balance = |R|^2 + (Z_right / Z_left) |T_u|^2`
+
+对**无耗、实阻抗边界**情形，应满足 `power_balance ≈ 1`。
 
 ---
 
-## 5. 后续 README 可继续完善方向
+## 6. 物理一致性验证
 
-- 增加“理论推导附录”（从波动方程到 2×2 动刚矩阵）
-- 增加“单位检查表”（参数量纲与常见误用）
-- 增加“与实验数据对比工作流”
-- 增加“API 文档 + 最小可复现案例（MRE）”
+当前测试覆盖了以下关键物理检查。
 
----
+### 6.1 动刚矩阵低频静态极限
 
-## 6. 许可证
+验证：
 
-当前仓库尚未声明许可证。若计划开源分发，建议补充 `LICENSE` 文件。
+`Layer.dynamic_stiffness(ω)` 在 `ω → 0` 时收敛到
 
+`E/h * [[1,-1],[-1,1]]`
 
-## 7. 物理一致性验证（可复现实验）
+### 6.2 阻抗匹配单层零反射
 
-仓库内新增了 `tests/test_physics_consistency.py`，覆盖了三个关键极限/基准场景：
+当单层与左右半空间阻抗完全匹配时，验证 `R ≈ 0`。
 
-1. **低频静态极限**：验证 `Layer.dynamic_stiffness(ω)` 在 `ω→0` 下收敛到 `E/h * [[1,-1],[-1,1]]`。  
-2. **阻抗匹配单层反射为零**：当层与左右外介质阻抗一致时，`R≈0`。  
-3. **超大界面刚度逼近完美界面**：`K_int→∞` 时结果逼近 perfect interface。  
+### 6.3 边界介质对象接口与旧阻抗接口等价
 
-运行方式：
+验证：
+
+- `HalfSpaceMedium(density, wave_speed)`
+- 直接传入标量阻抗
+
+得到相同频响。
+
+### 6.4 无耗能量守恒
+
+对实数层参数、实数界面刚度、实数半空间阻抗，验证：
+
+`|R|^2 + (Z_right / Z_left) |T_u|^2 ≈ 1`
+
+这一步是当前框架最重要的数值-物理校验之一。
+
+### 6.5 反向结构的传输功率互易性
+
+对一个非对称层状体，构造反向堆叠并交换左右半空间，验证：
+
+**传输功率在正反向求解下保持一致**
+
+这对应无耗线性系统的互易性要求。
+
+### 6.6 大刚度界面收敛到刚接参考
+
+用 `1e20` 与 `1e24` 两个大刚度比较，验证显式弹簧界面在大刚度极限下的结果收敛。
+
+### 6.7 多层必须显式给界面
+
+验证当前 `main` 分支的接口约束与实现一致，避免 README/代码不匹配。
+
+运行测试：
 
 ```bash
 PYTHONPATH=. python -m unittest tests/test_physics_consistency.py -v
 ```
 
-这三个验证分别对应了：
+---
 
-- 动刚矩阵公式本身（解析极限）；
-- 边界条件与波散射定义（物理边界正确性）；
-- 界面模型连续性（从 imperfect 到 perfect 的一致性）。
+## 7. 当前模型边界与后续建议
+
+当前模型是：
+
+- 1D 法向入射
+- 仅纵向波
+- 有限厚度分层体
+- 零厚度法向弹簧界面
+- 左右半空间阻抗端接
+
+因此它**不是**：
+
+- 导波色散模型
+- 任意角入射模型
+- 含剪切 / 模态转换 / 各向异性板理论的完整模型
+- 含换能器 / 耦合层 / 探头电学链条的完整测量模型
+
+后续更合理的演化路线是：
+
+1. 将“结构本体算子”与“端接/观测模型”进一步解耦。
+2. 增加刚性端 / 自由端 / 频率相关阻抗等边界模型。
+3. 增加损耗与频散。
+4. 增加功率流、吸收、条件数、奇点附近稳健性监测。
+5. 在验证充分后，再上升到可辨识性分析与后验推断。
+
+---
+
+## 8. 许可证
+
+当前仓库尚未声明许可证。若计划开源分发，建议补充 `LICENSE` 文件。

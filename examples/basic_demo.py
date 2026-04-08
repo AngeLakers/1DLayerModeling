@@ -5,32 +5,27 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from layered1d import Layer, InterfaceSpring, LaminatedStack
+from layered1d import HalfSpaceMedium, Layer, InterfaceSpring, LaminatedStack
 
 
 def main() -> None:
-    # Same three-layer structure for all samples.
     layers = [
         Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, name="Al-1"),
         Layer(thickness=0.2e-3, density=1200.0, young_modulus=3.0e9, name="Polymer"),
         Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, name="Al-2"),
     ]
 
-    # Only interface stiffness changes between samples.
     sample_interfaces = {
         "Sample 1 (baseline, I2=8.0e13)": (2.0e14, 8.0e13),
         "Sample 2 (I2=2.0e12)": (2.0e14, 2.0e12),
         "Sample 3 (I2=2.0e8)": (2.0e14, 2.0e8),
     }
 
-    water_impedance = 1000.0 * 1480.0
-    f_start_hz = 0.1e6
-    f_stop_hz = 2.5e6
-    df_hz = 1.0e3
-    # Linear frequency sampling with ~1 kHz interval (inclusive endpoints).
-    freqs = np.arange(f_start_hz, f_stop_hz + df_hz, df_hz)
+    left_medium = HalfSpaceMedium(density=1000.0, wave_speed=1480.0, name="Water")
+    right_medium = HalfSpaceMedium(density=7850.0, wave_speed=5900.0, name="Steel")
 
-    # Timestamped output folder: examples/outputs/YYYYMMDD_HHMMSS
+    freqs = np.arange(0.1e6, 2.5e6 + 1.0e3, 1.0e3)
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(__file__).resolve().parent / "outputs" / timestamp
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -44,8 +39,8 @@ def main() -> None:
         stack = LaminatedStack(layers=layers, interfaces=interfaces)
         sample_results[sample_name] = stack.solve_sweep(
             freqs,
-            left_medium_impedance=water_impedance,
-            right_medium_impedance=water_impedance,
+            left_medium=left_medium,
+            right_medium=right_medium,
             incident_displacement_amplitude=1.0,
         )
 
@@ -54,7 +49,7 @@ def main() -> None:
         plt.plot(result.frequencies_hz * 1e-6, result.reflection_magnitude, label=sample_name)
     plt.xlabel("Frequency (MHz)")
     plt.ylabel(r"$|R(\omega)|$")
-    plt.title("Reflection magnitude comparison")
+    plt.title(f"Reflection magnitude comparison ({left_medium.name} -> {right_medium.name})")
     plt.legend()
     plt.tight_layout()
     fig1.savefig(output_dir / "reflection_magnitude_comparison.png", dpi=180)
@@ -64,7 +59,7 @@ def main() -> None:
         plt.plot(result.frequencies_hz * 1e-6, result.input_impedance_magnitude, label=sample_name)
     plt.xlabel("Frequency (MHz)")
     plt.ylabel(r"$|Z_{in}(\omega)|$")
-    plt.title("Input impedance magnitude comparison")
+    plt.title(f"Input impedance magnitude comparison ({left_medium.name} -> {right_medium.name})")
     plt.legend()
     plt.tight_layout()
     fig2.savefig(output_dir / "input_impedance_comparison.png", dpi=180)

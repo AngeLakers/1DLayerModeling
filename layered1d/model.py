@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple, Dict, Any
+from typing import List, Optional, Sequence, Tuple, Dict, Any, Union
 import math
 import numpy as np
+
+from .media import HalfSpaceMedium
+
+MediumLike = Union[float, HalfSpaceMedium]
 
 
 @dataclass(frozen=True)
@@ -100,21 +104,18 @@ class Layer:
 
 @dataclass(frozen=True)
 class InterfaceSpring:
-    """Zero-thickness normal spring interface.
+    """Zero-thickness normal spring interface with explicit finite stiffness."""
 
-    If stiffness is None or math.inf, the interface is treated as perfectly bonded.
-    """
-
-    stiffness: Optional[float] = None
+    stiffness: float
     name: str = ""
 
-    @property
-    def is_perfect(self) -> bool:
-        return self.stiffness is None or math.isinf(self.stiffness)
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.stiffness):
+            raise ValueError("Interface stiffness must be finite.")
+        if self.stiffness <= 0:
+            raise ValueError("Interface stiffness must be positive.")
 
     def dynamic_stiffness(self) -> np.ndarray:
-        if self.is_perfect:
-            raise ValueError("Perfect interface has no explicit 2x2 spring matrix.")
         k = float(self.stiffness)
         return k * np.array([[1.0, -1.0], [-1.0, 1.0]], dtype=complex)
 
@@ -125,21 +126,23 @@ class Connectivity:
 
     num_dofs: int
     layer_dofs: List[Tuple[int, int]]
-    spring_dofs: List[Optional[Tuple[int, int]]]
-    interface_jump_nodes: List[Optional[Tuple[int, int]]]
+    spring_dofs: List[Tuple[int, int]]
+    interface_jump_nodes: List[Tuple[int, int]]
     node_positions: np.ndarray
     node_labels: List[str]
 
 
 class LaminatedStack:
-    """1D laminated stack with optional zero-thickness spring interfaces."""
+    """1D laminated stack with explicit zero-thickness spring interfaces."""
 
     def __init__(self, layers: Sequence[Layer], interfaces: Optional[Sequence[InterfaceSpring]] = None):
         if len(layers) == 0:
             raise ValueError("At least one layer is required.")
         self.layers: List[Layer] = list(layers)
         if interfaces is None:
-            interfaces = [InterfaceSpring(None, name=f"perfect_{i}") for i in range(len(layers) - 1)]
+            interfaces = []
+        if len(self.layers) > 1 and len(interfaces) == 0:
+            raise ValueError("Explicit interfaces are required when len(layers) > 1.")
         if len(interfaces) != len(layers) - 1:
             raise ValueError("interfaces length must equal len(layers) - 1.")
         self.interfaces: List[InterfaceSpring] = list(interfaces)
@@ -148,7 +151,7 @@ class LaminatedStack:
 
     def _build_connectivity(self) -> Connectivity:
         layer_dofs: List[Tuple[int, int]] = []
-        spring_dofs: List[Optional[Tuple[int, int]]] = [None] * (len(self.layers) - 1)
+        spring_dofs: List[Tuple[int, int]] = []
         node_positions: List[float] = [0.0]
         node_labels: List[str] = ["x0"]
 
@@ -157,7 +160,6 @@ class LaminatedStack:
         next_node = 1
 
         for j, layer in enumerate(self.layers):
-            # Create right node for this layer.
             if j == len(self.layers) - 1:
                 right_node = next_node
                 next_node += 1
@@ -166,23 +168,15 @@ class LaminatedStack:
                 node_labels.append(f"x{len(node_positions)-1}")
             else:
                 x += layer.thickness
-                interface = self.interfaces[j]
-                if interface.is_perfect:
-                    right_node = next_node
-                    next_node += 1
-                    node_positions.append(x)
-                    node_labels.append(f"x{len(node_positions)-1}")
-                    next_left = right_node
-                else:
-                    right_node = next_node
-                    next_node += 1
-                    node_positions.append(x)
-                    node_labels.append(f"x{len(node_positions)-1}L")
-                    next_left = next_node
-                    next_node += 1
-                    node_positions.append(x)
-                    node_labels.append(f"x{len(node_positions)-1}R")
-                    spring_dofs[j] = (right_node, next_left)
+                right_node = next_node
+                next_node += 1
+                node_positions.append(x)
+                node_labels.append(f"x{len(node_positions)-1}L")
+                next_left = next_node
+                next_node += 1
+                node_positions.append(x)
+                node_labels.append(f"x{len(node_positions)-1}R")
+                spring_dofs.append((right_node, next_left))
                 layer_dofs.append((current_left, right_node))
                 current_left = next_left
                 continue
@@ -222,12 +216,28 @@ class LaminatedStack:
             self._scatter_add_2x2(k_global, layer.dynamic_stiffness(omega), i, j)
 
         for interface, dofs in zip(self.interfaces, self._connectivity.spring_dofs):
-            if dofs is None:
-                continue
             i, j = dofs
             self._scatter_add_2x2(k_global, interface.dynamic_stiffness(), i, j)
 
         return k_global
+
+    def _resolve_boundary_impedance(
+        self,
+        positional_value: Optional[MediumLike],
+        named_value: Optional[MediumLike],
+        side: str,
+    ) -> float:
+        provided = [value for value in (positional_value, named_value) if value is not None]
+        if len(provided) != 1:
+            raise ValueError(
+                f"Provide exactly one of {side}_medium_impedance or {side}_medium."
+            )
+        value = provided[0]
+        if isinstance(value, HalfSpaceMedium):
+            return value.impedance
+        if not np.isfinite(value) or float(value) <= 0:
+            raise ValueError(f"{side} boundary impedance must be positive and finite.")
+        return float(value)
 
     def _apply_boundary_conditions(
         self,
@@ -237,17 +247,22 @@ class LaminatedStack:
         right_medium_impedance: float,
         incident_displacement_amplitude: complex,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Apply semi-infinite fluid loading and incident-wave forcing."""
+        """Apply semi-infinite boundary loads and left-incident excitation."""
         k_total = k_struct.copy()
         rhs = np.zeros(self.num_dofs, dtype=complex)
 
-        # Semi-infinite boundary impedances under the adopted port-force convention.
         k_total[0, 0] += 1j * omega * left_medium_impedance
         k_total[-1, -1] += 1j * omega * right_medium_impedance
         rhs[0] += 2j * omega * left_medium_impedance * incident_displacement_amplitude
         return k_total, rhs
 
-    def _recover_scattering_outputs(self, omega: float, u: np.ndarray, incident_displacement_amplitude: complex, left_medium_impedance: float) -> Dict[str, complex]:
+    def _recover_scattering_outputs(
+        self,
+        omega: float,
+        u: np.ndarray,
+        incident_displacement_amplitude: complex,
+        left_medium_impedance: float,
+    ) -> Dict[str, complex]:
         u_left = u[0]
         u_right = u[-1]
         a_inc = incident_displacement_amplitude
@@ -267,33 +282,42 @@ class LaminatedStack:
     def _compute_interface_jumps(self, u: np.ndarray) -> np.ndarray:
         interface_jumps: List[complex] = []
         for dofs in self._connectivity.interface_jump_nodes:
-            if dofs is None:
-                interface_jumps.append(0.0 + 0.0j)
-            else:
-                i, j = dofs
-                interface_jumps.append(u[j] - u[i])
+            i, j = dofs
+            interface_jumps.append(u[j] - u[i])
         return np.array(interface_jumps, dtype=complex)
 
     def solve_frequency_point(
         self,
         frequency_hz: float,
-        left_medium_impedance: float,
-        right_medium_impedance: float,
+        left_medium_impedance: Optional[MediumLike] = None,
+        right_medium_impedance: Optional[MediumLike] = None,
         incident_displacement_amplitude: complex = 1.0,
+        *,
+        left_medium: Optional[MediumLike] = None,
+        right_medium: Optional[MediumLike] = None,
     ) -> Dict[str, Any]:
         """Solve one frequency point.
 
         Boundary model:
         - left medium: semi-infinite, one incoming wave + one reflected wave
         - right medium: semi-infinite, outgoing transmitted wave only
+
+        Parameters
+        ----------
+        left_medium_impedance, right_medium_impedance:
+            Backward-compatible scalar impedances, or ``HalfSpaceMedium`` objects.
+        left_medium, right_medium:
+            Preferred explicit boundary-medium objects or scalar impedances.
         """
         omega = 2.0 * math.pi * frequency_hz
+        left_z = self._resolve_boundary_impedance(left_medium_impedance, left_medium, "left")
+        right_z = self._resolve_boundary_impedance(right_medium_impedance, right_medium, "right")
         k_struct = self.assemble_structure_matrix(omega)
         k_total, rhs = self._apply_boundary_conditions(
             k_struct,
             omega=omega,
-            left_medium_impedance=left_medium_impedance,
-            right_medium_impedance=right_medium_impedance,
+            left_medium_impedance=left_z,
+            right_medium_impedance=right_z,
             incident_displacement_amplitude=incident_displacement_amplitude,
         )
 
@@ -302,7 +326,7 @@ class LaminatedStack:
             omega,
             u=u,
             incident_displacement_amplitude=incident_displacement_amplitude,
-            left_medium_impedance=left_medium_impedance,
+            left_medium_impedance=left_z,
         )
 
         return {
@@ -315,14 +339,19 @@ class LaminatedStack:
             "rhs": rhs,
             "node_positions": self.node_positions,
             "node_labels": self.node_labels,
+            "left_boundary_impedance": left_z,
+            "right_boundary_impedance": right_z,
         }
 
     def solve_sweep(
         self,
         frequencies_hz: Sequence[float],
-        left_medium_impedance: float,
-        right_medium_impedance: float,
+        left_medium_impedance: Optional[MediumLike] = None,
+        right_medium_impedance: Optional[MediumLike] = None,
         incident_displacement_amplitude: complex = 1.0,
+        *,
+        left_medium: Optional[MediumLike] = None,
+        right_medium: Optional[MediumLike] = None,
     ) -> "FrequencyResponseResult":
         from .solver import FrequencyResponseResult
 
@@ -333,6 +362,8 @@ class LaminatedStack:
                 left_medium_impedance=left_medium_impedance,
                 right_medium_impedance=right_medium_impedance,
                 incident_displacement_amplitude=incident_displacement_amplitude,
+                left_medium=left_medium,
+                right_medium=right_medium,
             )
             for f in freqs
         ]

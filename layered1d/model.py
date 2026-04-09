@@ -5,27 +5,75 @@ from typing import List, Optional, Sequence, Tuple, Dict, Any, Union
 import math
 import numpy as np
 
+from .materials import Material
 from .media import HalfSpaceMedium
 
 MediumLike = Union[float, HalfSpaceMedium]
 
 
-@dataclass(frozen=True)
 class Layer:
-    """1D longitudinal layer."""
+    """1D longitudinal layer.
 
-    thickness: float
-    density: float
-    young_modulus: float
-    name: str = ""
+    Parameters
+    ----------
+    thickness:
+        Layer thickness [m].
+    density, young_modulus:
+        Backward-compatible direct material properties.
+    material:
+        Preferred material object. When provided, ``density`` and
+        ``young_modulus`` must be omitted.
+    name:
+        Optional layer label. Defaults to the material name when available.
+    """
+
+    def __init__(
+        self,
+        thickness: float,
+        density: Optional[float] = None,
+        young_modulus: Optional[float] = None,
+        name: str = "",
+        *,
+        material: Optional[Material] = None,
+    ) -> None:
+        if not math.isfinite(thickness) or thickness <= 0:
+            raise ValueError("thickness must be positive and finite.")
+
+        if material is not None and (density is not None or young_modulus is not None):
+            raise ValueError("Provide either material, or density and young_modulus, but not both.")
+
+        if material is None:
+            if density is None or young_modulus is None:
+                raise ValueError("Provide either material, or both density and young_modulus.")
+            material = Material(
+                density=float(density),
+                young_modulus=float(young_modulus),
+                name=name,
+            )
+
+        self.thickness = float(thickness)
+        self.material = material
+        self.name = name or material.name
+
+    @classmethod
+    def from_material(cls, thickness: float, material: Material, name: str = "") -> "Layer":
+        return cls(thickness=thickness, material=material, name=name)
+
+    @property
+    def density(self) -> float:
+        return self.material.density
+
+    @property
+    def young_modulus(self) -> float:
+        return self.material.young_modulus
 
     @property
     def wave_speed(self) -> float:
-        return math.sqrt(self.young_modulus / self.density)
+        return self.material.wave_speed
 
     @property
     def impedance(self) -> float:
-        return self.density * self.wave_speed
+        return self.material.impedance
 
     def wavenumber(self, omega: float) -> complex:
         return omega / self.wave_speed
@@ -76,6 +124,12 @@ class Layer:
             "a_plus": np.full_like(z_local, a_plus, dtype=complex),
             "a_minus": np.full_like(z_local, a_minus, dtype=complex),
         }
+
+    def __repr__(self) -> str:
+        return (
+            f"Layer(thickness={self.thickness!r}, material={self.material!r}, "
+            f"name={self.name!r})"
+        )
 
 
 @dataclass(frozen=True)
@@ -184,7 +238,7 @@ class LaminatedStack:
 
     def assemble_structure_matrix(self, omega: float) -> np.ndarray:
         k_global = np.zeros((self.num_dofs, self.num_dofs), dtype=complex)
-        for layer, (i, j)`in zip(self.layers, self._connectivity.layer_dofs):
+        for layer, (i, j) in zip(self.layers, self._connectivity.layer_dofs):
             self._scatter_add_2x2(k_global, layer.dynamic_stiffness(omega), i, j)
         for interface, dofs in zip(self.interfaces, self._connectivity.spring_dofs):
             i, j = dofs

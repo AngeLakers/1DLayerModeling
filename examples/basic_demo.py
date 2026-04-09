@@ -5,14 +5,24 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from layered1d import HalfSpaceMedium, Layer, InterfaceSpring, LaminatedStack
+from layered1d import HalfSpaceMedium, InterfaceSpring, LaminatedStack, Layer
+from layered1d.materials import Material
 
 
 def main() -> None:
+    aluminum = Material(density=2700.0, young_modulus=70e9, name="Aluminum", poisson_ratio=0.33)
+    polymer = Material(
+        density=1200.0,
+        young_modulus=3.0e9,
+        name="Polymer",
+        poisson_ratio=0.40,
+        notes="Only density and young_modulus are used in the current 1D solver.",
+    )
+
     layers = [
-        Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, name="Al-1"),
-        Layer(thickness=0.2e-3, density=1200.0, young_modulus=3.0e9, name="Polymer"),
-        Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, name="Al-2"),
+        Layer.from_material(thickness=1.0e-3, material=aluminum, name="Al-1"),
+        Layer.from_material(thickness=0.2e-3, material=polymer, name="Polymer"),
+        Layer.from_material(thickness=1.0e-3, material=aluminum, name="Al-2"),
     ]
 
     sample_interfaces = {

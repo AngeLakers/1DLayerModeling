@@ -27,24 +27,40 @@ from layered1d.materials import Material
 aluminum = Material(
     density=2700.0,
     young_modulus=70e9,
-    name="Aluminum",
     poisson_ratio=0.33,
+    name="Aluminum",
 )
 
 polymer = Material(
     density=1200.0,
     young_modulus=3.0e9,
-    name="Polymer",
     poisson_ratio=0.40,
-    notes="Only density and young_modulus are used in the current 1D solver.",
+    name="Polymer",
 )
 ```
 
 注意：
 
-- 当前 1D 求解器真正参与计算的只有 `density` 和 `young_modulus`
-- `poisson_ratio`、`attenuation_alpha`、`notes` 目前主要用于组织化管理和后续扩展
-- 这里的 `young_modulus` 在当前模型语义下可理解为**1D 有效纵向模量**
+- 当前 `Material` 默认按**各向同性固体**解释
+- `longitudinal_wave_speed` 不是 `sqrt(E/ρ)`
+- 当前实现使用的是各向同性固体的纵波速度
+
+```text
+c_L = sqrt( E(1-ν) / ( ρ(1+ν)(1-2ν) ) )
+```
+
+- 因此这里的 `young_modulus` **不能**再被理解成 1D 有效纵向模量或 `c11`
+- `poisson_ratio` 现在是计算层内纵波速度的必要参数，不应再默认偷设为 `0`
+- 当前 1D 求解器真正参与层内波速计算的是 `density + young_modulus + poisson_ratio`
+- `attenuation_alpha`、`notes` 目前仍主要用于组织化管理和后续扩展
+
+另外，`Material` 还提供：
+
+- `shear_modulus`
+- `longitudinal_modulus`
+- `shear_wave_speed`
+- `longitudinal_wave_speed`
+- `impedance`
 
 ### 1.2 再用材料构造层
 
@@ -64,10 +80,16 @@ layers = [
 
 ## 2. 向后兼容
 
-旧写法仍然可用：
+旧写法仍然可用，但现在必须显式给出 `poisson_ratio`：
 
 ```python
-layer = Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, name="Al-1")
+layer = Layer(
+    thickness=1.0e-3,
+    density=2700.0,
+    young_modulus=70e9,
+    poisson_ratio=0.33,
+    name="Al-1",
+)
 ```
 
 但当前更推荐：
@@ -82,7 +104,7 @@ layer = Layer.from_material(thickness=1.0e-3, material=aluminum, name="Al-1")
 layer = Layer(thickness=1.0e-3, material=aluminum, name="Al-1")
 ```
 
-如果你同时传 `material` 和 `density / young_modulus`，代码会直接报错。
+如果你同时传 `material` 和 `density / young_modulus / poisson_ratio`，代码会直接报错。
 
 ---
 
@@ -93,9 +115,12 @@ layer = Layer(thickness=1.0e-3, material=aluminum, name="Al-1")
 ```python
 from layered1d import HalfSpaceMedium
 
-left_medium = HalfSpaceMedium(density=1000.0, wave_speed=1480.0, name="Water")
-right_medium = HalfSpaceMedium(density=7850.0, wave_speed=5900.0, name="Steel")
+left_medium = HalfSpaceMedium(density=1000.0, longitudinal_wave_speed=1480.0, name="Water")
+right_medium = HalfSpaceMedium(density=7850.0, longitudinal_wave_speed=5900.0, name="Steel")
 ```
+
+这里的 `longitudinal_wave_speed` 是你**直接指定**给边界半空间的纵波速度。
+它不是从 `E, ν` 自动反推的材料对象。
 
 然后：
 
@@ -112,7 +137,7 @@ result = stack.solve_sweep(
 ## 4. 代码结构
 
 - `layered1d/materials.py`
-  - `Material`：层材料参数对象
+  - `Material`：各向同性固体层材料对象
 - `layered1d/media.py`
   - `HalfSpaceMedium`：半无限边界介质
 - `layered1d/model.py`
@@ -137,11 +162,11 @@ result = stack.solve_sweep(
 python -m unittest discover -s tests -v
 ```
 
-当前测试覆盖：
+当前测试应覆盖：
 
-- `Material` 派生波速与阻抗
-- `Layer.from_material(...)` 与旧构造方式等价
-- 低频静态极限
+- `Material` 派生纵波速度、横波速度与阻抗
+- `Layer.from_material(...)` 与 legacy 构造方式等价
+- 低频静态极限现在以 `longitudinal_modulus / h` 为基准，而不是 `E / h`
 - 阻抗匹配零反射
 - 介质对象 / 标量阻抗等价
 - 无耗功率守恒
@@ -178,6 +203,6 @@ python -m unittest discover -s tests -v
 如果后面继续扩展，更合理的路是：
 
 1. 保持 `Material` 作为层内材料的一等对象
-2. 将损耗、频散先挂到 `Material` 上
+2. 把损耗、频散首先挂到 `Material`
 3. 将“结构本体算子”和“端接/观测模型”进一步拆开
 4. 再上升到可辨识性分析和后验推断

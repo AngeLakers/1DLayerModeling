@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple, Dict, Any, Union
 import math
+import warnings
 import numpy as np
 
 from .materials import Material
@@ -18,11 +19,11 @@ class Layer:
     ----------
     thickness:
         Layer thickness [m].
-    density, young_modulus:
+    density, young_modulus, poisson_ratio, attenuation_alpha, notes:
         Backward-compatible direct material properties.
     material:
         Preferred material object. When provided, ``density`` and
-        ``young_modulus`` must be omitted.
+        legacy material fields must be omitted.
     name:
         Optional layer label. Defaults to the material name when available.
     """
@@ -32,6 +33,9 @@ class Layer:
         thickness: float,
         density: Optional[float] = None,
         young_modulus: Optional[float] = None,
+        poisson_ratio: Optional[float] = None,
+        attenuation_alpha: Optional[float] = None,
+        notes: str = "",
         name: str = "",
         *,
         material: Optional[Material] = None,
@@ -39,16 +43,36 @@ class Layer:
         if not math.isfinite(thickness) or thickness <= 0:
             raise ValueError("thickness must be positive and finite.")
 
-        if material is not None and (density is not None or young_modulus is not None):
-            raise ValueError("Provide either material, or density and young_modulus, but not both.")
+        legacy_material_fields_provided = any(
+            value is not None
+            for value in (density, young_modulus, poisson_ratio, attenuation_alpha)
+        ) or bool(notes)
+
+        if material is not None and legacy_material_fields_provided:
+            raise ValueError(
+                "Provide either material, or direct material properties "
+                "(density/young_modulus/poisson_ratio/attenuation_alpha/notes), but not both."
+            )
 
         if material is None:
             if density is None or young_modulus is None:
-                raise ValueError("Provide either material, or both density and young_modulus.")
+                raise ValueError(
+                    "Provide either material, or both density and young_modulus. "
+                    "Preferred API: Layer(..., material=Material(...))."
+                )
+            warnings.warn(
+                "Layer(..., density=..., young_modulus=...) is supported for compatibility; "
+                "prefer Layer(..., material=Material(...)).",
+                FutureWarning,
+                stacklevel=2,
+            )
             material = Material(
                 density=float(density),
                 young_modulus=float(young_modulus),
                 name=name,
+                poisson_ratio=poisson_ratio,
+                attenuation_alpha=attenuation_alpha,
+                notes=notes,
             )
 
         self.thickness = float(thickness)
@@ -68,15 +92,33 @@ class Layer:
         return self.material.young_modulus
 
     @property
+    def poisson_ratio(self) -> float:
+        return self.material.poisson_ratio
+
+    @property
+    def attenuation_alpha(self) -> Optional[float]:
+        return self.material.attenuation_alpha
+
+    @property
+    def notes(self) -> str:
+        return self.material.notes
+
+    @property
+    def longitudinal_wave_speed(self) -> float:
+        # NOTE: Delegates to material longitudinal wave speed (P-wave speed).
+        return self.material.longitudinal_wave_speed
+
+    @property
     def wave_speed(self) -> float:
-        return self.material.wave_speed
+        # Backward-compatible alias. Prefer longitudinal_wave_speed.
+        return self.longitudinal_wave_speed
 
     @property
     def impedance(self) -> float:
         return self.material.impedance
 
     def wavenumber(self, omega: float) -> complex:
-        return omega / self.wave_speed
+        return omega / self.longitudinal_wave_speed
 
     def dynamic_stiffness(self, omega: float) -> np.ndarray:
         k = self.wavenumber(omega)

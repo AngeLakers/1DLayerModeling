@@ -16,7 +16,7 @@ def main() -> None:
         young_modulus=3.0e9,
         name="Polymer",
         poisson_ratio=0.40,
-        notes="Only density and young_modulus are used in the current 1D solver.",
+        notes="Current isotropic-solid material model uses density, young_modulus, and poisson_ratio.",
     )
 
     layers = [
@@ -31,8 +31,8 @@ def main() -> None:
         "Sample 3 (I2=2.0e8)": (2.0e14, 2.0e8),
     }
 
-    left_medium = HalfSpaceMedium(density=1000.0, wave_speed=1480.0, name="Water")
-    right_medium = HalfSpaceMedium(density=7850.0, wave_speed=5900.0, name="Steel")
+    left_medium = HalfSpaceMedium(density=1000.0, longitudinal_wave_speed=1480.0, name="Water")
+    right_medium = HalfSpaceMedium(density=7850.0, longitudinal_wave_speed=5900.0, name="Steel")
 
     freqs = np.arange(0.1e6, 2.5e6 + 1.0e3, 1.0e3)
 
@@ -58,7 +58,7 @@ def main() -> None:
     for sample_name, result in sample_results.items():
         plt.plot(result.frequencies_hz * 1e-6, result.reflection_magnitude, label=sample_name)
     plt.xlabel("Frequency (MHz)")
-    plt.ylabel(r"$|R(\\omega)|$")
+    plt.ylabel(r"$|R(\omega)|$")
     plt.title(f"Reflection magnitude comparison ({left_medium.name} -> {right_medium.name})")
     plt.legend()
     plt.tight_layout()
@@ -68,7 +68,7 @@ def main() -> None:
     for sample_name, result in sample_results.items():
         plt.plot(result.frequencies_hz * 1e-6, result.input_impedance_magnitude, label=sample_name)
     plt.xlabel("Frequency (MHz)")
-    plt.ylabel(r"$|Z_{in}(\\omega)|$")
+    plt.ylabel(r"$|Z_{in}(\omega)|$")
     plt.title(f"Input impedance magnitude comparison ({left_medium.name} -> {right_medium.name})")
     plt.legend()
     plt.tight_layout()

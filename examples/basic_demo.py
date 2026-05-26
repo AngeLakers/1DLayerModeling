@@ -5,14 +5,24 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from layered1d import HalfSpaceMedium, Layer, InterfaceSpring, LaminatedStack
+from layered1d import HalfSpaceMedium, InterfaceSpring, LaminatedStack, Layer
+from layered1d.materials import Material
 
 
 def main() -> None:
+    aluminum = Material(density=2700.0, young_modulus=70e9, name="Aluminum", poisson_ratio=0.33)
+    polymer = Material(
+        density=1200.0,
+        young_modulus=3.0e9,
+        name="Polymer",
+        poisson_ratio=0.40,
+        notes="Current isotropic-solid material model uses density, young_modulus, and poisson_ratio.",
+    )
+
     layers = [
-        Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, name="Al-1"),
-        Layer(thickness=0.2e-3, density=1200.0, young_modulus=3.0e9, name="Polymer"),
-        Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, name="Al-2"),
+        Layer.from_material(thickness=1.0e-3, material=aluminum, name="Al-1"),
+        Layer.from_material(thickness=0.2e-3, material=polymer, name="Polymer"),
+        Layer.from_material(thickness=1.0e-3, material=aluminum, name="Al-2"),
     ]
 
     sample_interfaces = {
@@ -21,8 +31,8 @@ def main() -> None:
         "Sample 3 (I2=2.0e8)": (2.0e14, 2.0e8),
     }
 
-    left_medium = HalfSpaceMedium(density=1000.0, wave_speed=1480.0, name="Water")
-    right_medium = HalfSpaceMedium(density=7850.0, wave_speed=5900.0, name="Steel")
+    left_medium = HalfSpaceMedium(density=1000.0, longitudinal_wave_speed=1480.0, name="Water")
+    right_medium = HalfSpaceMedium(density=7850.0, longitudinal_wave_speed=5900.0, name="Steel")
 
     freqs = np.arange(0.1e6, 2.5e6 + 1.0e3, 1.0e3)
 
@@ -48,7 +58,7 @@ def main() -> None:
     for sample_name, result in sample_results.items():
         plt.plot(result.frequencies_hz * 1e-6, result.reflection_magnitude, label=sample_name)
     plt.xlabel("Frequency (MHz)")
-    plt.ylabel(r"$|R(\\omega)|$")
+    plt.ylabel(r"$|R(\omega)|$")
     plt.title(f"Reflection magnitude comparison ({left_medium.name} -> {right_medium.name})")
     plt.legend()
     plt.tight_layout()
@@ -56,10 +66,10 @@ def main() -> None:
 
     fig2 = plt.figure(figsize=(8, 4.5))
     for sample_name, result in sample_results.items():
-        plt.plot(result.frequencies_hz * 1e-6, result.input_impedance_magnitude, label=sample_name)
+        plt.plot(result.frequencies_hz * 1e-6, np.log10(result.input_impedance_magnitude), label=sample_name)
     plt.xlabel("Frequency (MHz)")
-    plt.ylabel(r"$|Z_{in}(\\omega)|$")
-    plt.title(f"Input impedance magnitude comparison ({left_medium.name} -> {right_medium.name})")
+    plt.ylabel(r"$\log_{10}(Z_{in}(\omega))$")
+    plt.title(f"Input impedance (log scale) comparison ({left_medium.name} -> {right_medium.name})")
     plt.legend()
     plt.tight_layout()
     fig2.savefig(output_dir / "input_impedance_comparison.png", dpi=180)

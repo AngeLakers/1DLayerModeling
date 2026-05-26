@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.2.1
+
+### Changed
+
+- 修正纵波定义：层内 `longitudinal_wave_speed` 明确为横向无限 / 横向受限层状介质中的法向平面纵波速度。
+- README 与代码注释去除细杆一维杆波语义，改用有效纵向模量 `M` 表述。
+- 低频静态极限说明改为平面应变 / 横向受限条件下的有效纵向刚度 `M / h`。
+
+### Fixed
+
+- `Layer` legacy 构造器现在会显式检查 `poisson_ratio` 缺失或非有限值，并返回清晰错误信息。
+- `Layer` 补齐 `longitudinal_modulus`、`shear_modulus`、`shear_wave_speed` 代理属性，与 `Material` API 保持一致。
+
+### Validation
+
+- 测试通过：
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 ## v1.2.0
 
 基于 `main (v1.1.1)`、`feature/custom-halfspace-physics-tests` 和 `copilot/analyze-test-coverage` 的清理整合版本。

@@ -3,32 +3,145 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple, Dict, Any, Union
 import math
+import warnings
 import numpy as np
 
+from .materials import Material
 from .media import HalfSpaceMedium
 
 MediumLike = Union[float, HalfSpaceMedium]
 
 
-@dataclass(frozen=True)
 class Layer:
-    """1D longitudinal layer."""
+    """Finite-thickness layer for normal plane longitudinal waves.
 
-    thickness: float
-    density: float
-    young_modulus: float
-    name: str = ""
+    Parameters
+    ----------
+    thickness:
+        Layer thickness [m].
+    density, young_modulus, poisson_ratio, attenuation_alpha, notes:
+        Backward-compatible direct material properties.
+    material:
+        Preferred material object. When provided, ``density`` and
+        legacy material fields must be omitted.
+    name:
+        Optional layer label. Defaults to the material name when available.
+    """
+
+    def __init__(
+        self,
+        thickness: float,
+        density: Optional[float] = None,
+        young_modulus: Optional[float] = None,
+        poisson_ratio: Optional[float] = None,
+        attenuation_alpha: Optional[float] = None,
+        notes: str = "",
+        name: str = "",
+        *,
+        material: Optional[Material] = None,
+    ) -> None:
+        if not math.isfinite(thickness) or thickness <= 0:
+            raise ValueError("thickness must be positive and finite.")
+
+        legacy_material_fields_provided = any(
+            value is not None
+            for value in (density, young_modulus, poisson_ratio, attenuation_alpha)
+        ) or bool(notes)
+
+        if material is not None and legacy_material_fields_provided:
+            raise ValueError(
+                "Provide either material, or direct material properties "
+                "(density/young_modulus/poisson_ratio/attenuation_alpha/notes), but not both."
+            )
+
+        if material is None:
+            if density is None or young_modulus is None:
+                raise ValueError(
+                    "Provide either material, or both density and young_modulus. "
+                    "Preferred API: Layer(..., material=Material(...))."
+                )
+            if poisson_ratio is None:
+                raise ValueError(
+                    "poisson_ratio must be provided for legacy Layer construction. "
+                    "Preferred API: Layer(..., material=Material(...))."
+                )
+            try:
+                poisson_ratio_value = float(poisson_ratio)
+            except (TypeError, ValueError):
+                raise ValueError("poisson_ratio must be finite for legacy Layer construction.") from None
+            if not math.isfinite(poisson_ratio_value):
+                raise ValueError("poisson_ratio must be finite for legacy Layer construction.")
+            warnings.warn(
+                "Layer(..., density=..., young_modulus=...) is supported for compatibility; "
+                "prefer Layer(..., material=Material(...)).",
+                FutureWarning,
+                stacklevel=2,
+            )
+            material = Material(
+                density=float(density),
+                young_modulus=float(young_modulus),
+                name=name,
+                poisson_ratio=poisson_ratio_value,
+                attenuation_alpha=attenuation_alpha,
+                notes=notes,
+            )
+
+        self.thickness = float(thickness)
+        self.material = material
+        self.name = name or material.name
+
+    @classmethod
+    def from_material(cls, thickness: float, material: Material, name: str = "") -> "Layer":
+        return cls(thickness=thickness, material=material, name=name)
+
+    @property
+    def density(self) -> float:
+        return self.material.density
+
+    @property
+    def young_modulus(self) -> float:
+        return self.material.young_modulus
+
+    @property
+    def poisson_ratio(self) -> float:
+        return self.material.poisson_ratio
+
+    @property
+    def shear_modulus(self) -> float:
+        return self.material.shear_modulus
+
+    @property
+    def longitudinal_modulus(self) -> float:
+        return self.material.longitudinal_modulus
+
+    @property
+    def attenuation_alpha(self) -> Optional[float]:
+        return self.material.attenuation_alpha
+
+    @property
+    def notes(self) -> str:
+        return self.material.notes
+
+    @property
+    def longitudinal_wave_speed(self) -> float:
+        # NOTE: Delegates to material normal plane longitudinal wave speed.
+        return self.material.longitudinal_wave_speed
+
+    @property
+    def shear_wave_speed(self) -> float:
+        return self.material.shear_wave_speed
 
     @property
     def wave_speed(self) -> float:
-        return math.sqrt(self.young_modulus / self.density)
+        # Backward-compatible alias. Prefer longitudinal_wave_speed.
+        return self.longitudinal_wave_speed
 
     @property
     def impedance(self) -> float:
-        return self.density * self.wave_speed
+        return self.material.impedance
 
     def wavenumber(self, omega: float) -> complex:
-        return omega / self.wave_speed
+        return omega / self.longitudinal_wave_speed
 
     def dynamic_stiffness(self, omega: float) -> np.ndarray:
         k = self.wavenumber(omega)
@@ -76,6 +189,12 @@ class Layer:
             "a_plus": np.full_like(z_local, a_plus, dtype=complex),
             "a_minus": np.full_like(z_local, a_minus, dtype=complex),
         }
+
+    def __repr__(self) -> str:
+        return (
+            f"Layer(thickness={self.thickness!r}, material={self.material!r}, "
+            f"name={self.name!r})"
+        )
 
 
 @dataclass(frozen=True)
@@ -184,7 +303,7 @@ class LaminatedStack:
 
     def assemble_structure_matrix(self, omega: float) -> np.ndarray:
         k_global = np.zeros((self.num_dofs, self.num_dofs), dtype=complex)
-        for layer, (i, j)`in zip(self.layers, self._connectivity.layer_dofs):
+        for layer, (i, j) in zip(self.layers, self._connectivity.layer_dofs):
             self._scatter_add_2x2(k_global, layer.dynamic_stiffness(omega), i, j)
         for interface, dofs in zip(self.interfaces, self._connectivity.spring_dofs):
             i, j = dofs

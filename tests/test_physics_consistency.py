@@ -157,6 +157,76 @@ class PhysicsConsistencyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Explicit interfaces are required"):
             LaminatedStack(layers=layers, interfaces=[])
 
+    def test_half_space_medium_impedance_paths_and_aliases(self) -> None:
+        impedance_only = HalfSpaceMedium(acoustic_impedance=1.8e6, name="Z-only")
+        self.assertEqual(impedance_only.impedance, 1.8e6)
+        self.assertIsNone(impedance_only.wave_speed)
+
+        via_factory = HalfSpaceMedium.from_impedance(impedance=2.2e6, name="factory")
+        self.assertEqual(via_factory.impedance, 2.2e6)
+
+        with self.assertWarns(FutureWarning):
+            compatible_alias = HalfSpaceMedium(
+                density=1000.0,
+                longitudinal_wave_speed=1500.0,
+                wave_speed=1500.0,
+            )
+        self.assertEqual(compatible_alias.wave_speed, compatible_alias.longitudinal_wave_speed)
+
+    def test_half_space_medium_rejects_invalid_or_conflicting_inputs(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Provide only one of wave_speed or longitudinal_wave_speed"):
+            HalfSpaceMedium(density=1000.0, longitudinal_wave_speed=1500.0, wave_speed=1490.0)
+
+        with self.assertRaisesRegex(ValueError, "Provide either acoustic_impedance"):
+            HalfSpaceMedium(density=1000.0)
+
+        with self.assertRaisesRegex(ValueError, "acoustic_impedance must be positive and finite"):
+            HalfSpaceMedium(acoustic_impedance=0.0)
+
+        with self.assertRaisesRegex(ValueError, "inconsistent with density"):
+            HalfSpaceMedium(
+                density=1000.0,
+                longitudinal_wave_speed=1500.0,
+                acoustic_impedance=1.0e6,
+            )
+
+    def test_layer_and_boundary_impedance_validation_edges(self) -> None:
+        material = Material(density=2700.0, young_modulus=70e9, poisson_ratio=0.33, name="Aluminum")
+        with self.assertRaisesRegex(ValueError, "thickness must be positive and finite"):
+            Layer.from_material(thickness=0.0, material=material)
+        with self.assertRaisesRegex(ValueError, "Provide either material"):
+            Layer(
+                thickness=1.0e-3,
+                density=2700.0,
+                young_modulus=70e9,
+                poisson_ratio=0.33,
+                material=material,
+            )
+
+        stack = LaminatedStack(layers=[Layer.from_material(thickness=1.0e-3, material=material)])
+        with self.assertRaisesRegex(ValueError, "Provide exactly one of left_medium_impedance or left_medium"):
+            stack.solve_frequency_point(0.5e6, right_medium_impedance=1.5e6)
+        with self.assertRaisesRegex(ValueError, "Provide exactly one of left_medium_impedance or left_medium"):
+            stack.solve_frequency_point(
+                0.5e6,
+                left_medium_impedance=1.5e6,
+                left_medium=HalfSpaceMedium(acoustic_impedance=1.5e6),
+                right_medium_impedance=1.5e6,
+            )
+        with self.assertRaisesRegex(ValueError, "left boundary impedance must be positive and finite"):
+            stack.solve_frequency_point(0.5e6, left_medium_impedance=-1.0, right_medium_impedance=1.5e6)
+
+    def test_zero_incident_amplitude_returns_infinite_input_impedance(self) -> None:
+        material = Material(density=1000.0, young_modulus=1.875e9, poisson_ratio=0.25)
+        stack = LaminatedStack(layers=[Layer.from_material(thickness=1.0e-3, material=material)])
+        solution = stack.solve_frequency_point(
+            frequency_hz=0.5e6,
+            left_medium_impedance=1.5e6,
+            right_medium_impedance=1.5e6,
+            incident_displacement_amplitude=0.0,
+        )
+        self.assertTrue(np.isinf(solution["input_impedance"]))
+
     def test_reflection_is_zero_for_impedance_matched_single_layer(self) -> None:
         rho = 1000.0
         nu = 0.25

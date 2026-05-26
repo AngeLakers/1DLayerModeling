@@ -7,18 +7,19 @@ import math
 
 @dataclass(frozen=True)
 class Material:
-    """Isotropic solid material definition for the current 1D normal-incidence model.
+    """Isotropic solid material for normal plane longitudinal waves.
 
     Notes
     -----
-    In the current solver, the longitudinal wave speed is derived under the
-    isotropic-solid assumption from ``density``, ``young_modulus``, and
-    ``poisson_ratio``:
+    In the current solver, ``longitudinal_wave_speed`` is the normal plane
+    longitudinal wave speed for a laterally constrained / laterally infinite
+    isotropic layer. It is derived from the longitudinal modulus ``M``:
 
-        c_L = sqrt( E (1 - nu) / ( rho (1 + nu) (1 - 2 nu) ) )
+        M = E (1 - nu) / ((1 + nu) (1 - 2 nu))
+        longitudinal_wave_speed = sqrt(M / rho)
 
     This means ``young_modulus`` is *not* treated as the longitudinal modulus
-    c11. Optional fields are carried for organization and for future model
+    ``M``. Optional fields are carried for organization and for future model
     extensions.
     """
 
@@ -34,6 +35,8 @@ class Material:
             raise ValueError("density must be positive and finite.")
         if not math.isfinite(self.young_modulus) or self.young_modulus <= 0:
             raise ValueError("young_modulus must be positive and finite.")
+        if self.poisson_ratio is None:
+            raise ValueError("poisson_ratio must be provided and finite.")
         if (not math.isfinite(self.poisson_ratio)) or not (-1.0 < self.poisson_ratio < 0.5):
             raise ValueError("poisson_ratio must be finite and lie in (-1, 0.5).")
         if self.attenuation_alpha is not None:

@@ -1,8 +1,8 @@
 # 1DLayerModeling
 
-用于**一维法向入射层状结构**的频域前向建模工具。当前实现基于动态刚度法，面向：
+用于**层状半无限 / 横向无限介质中的法向平面纵波**频域前向建模工具。当前实现基于动态刚度法，面向：
 
-- 有限厚度多层结构的 1D 法向纵波响应
+- 有限厚度层状结构在左右半无限介质端接下的法向平面纵波响应
 - 零厚度界面弹簧对频谱的影响
 - 左右半无限介质端接条件下的反射、透射与输入阻抗计算
 
@@ -43,15 +43,16 @@ polymer = Material(
 
 - 当前 `Material` 默认按**各向同性固体**解释
 - `longitudinal_wave_speed` 不是 `sqrt(E/ρ)`
-- 当前实现使用的是各向同性固体的纵波速度
+- 当前实现使用的是层法向平面纵波速度
 
 ```text
-c_L = sqrt( E(1-ν) / ( ρ(1+ν)(1-2ν) ) )
+M = E(1-ν) / ((1+ν)(1-2ν))
+longitudinal_wave_speed = sqrt(M / ρ)
 ```
 
-- 因此这里的 `young_modulus` **不能**再被理解成 1D 有效纵向模量或 `c11`
+- 因此这里的 `young_modulus` **不能**再被理解成平面应变 / 横向受限有效纵向模量 `M` 或 `c11`
 - `poisson_ratio` 现在是计算层内纵波速度的必要参数，不应再默认偷设为 `0`
-- 当前 1D 求解器真正参与层内波速计算的是 `density + young_modulus + poisson_ratio`
+- 当前法向平面波求解器真正参与层内波速计算的是 `density + young_modulus + poisson_ratio`
 - `attenuation_alpha`、`notes` 目前仍主要用于组织化管理和后续扩展
 
 另外，`Material` 还提供：
@@ -61,6 +62,9 @@ c_L = sqrt( E(1-ν) / ( ρ(1+ν)(1-2ν) ) )
 - `shear_wave_speed`
 - `longitudinal_wave_speed`
 - `impedance`
+
+`Layer` 会代理这些常用材料属性，因此 `layer.longitudinal_modulus`、
+`layer.shear_modulus`、`layer.shear_wave_speed` 与 `layer.material` 上的同名属性一致。
 
 ### 1.2 再用材料构造层
 
@@ -166,7 +170,7 @@ python -m unittest discover -s tests -v
 
 - `Material` 派生纵波速度、横波速度与阻抗
 - `Layer.from_material(...)` 与 legacy 构造方式等价
-- 低频静态极限现在以 `longitudinal_modulus / h` 为基准，而不是 `E / h`
+- 低频静态极限对应平面应变 / 横向受限条件下的有效纵向刚度 `M / h`
 - 阻抗匹配零反射
 - 介质对象 / 标量阻抗等价
 - 无耗功率守恒
@@ -183,9 +187,9 @@ python -m unittest discover -s tests -v
 
 当前模型是：
 
-- 1D 法向入射
-- 仅纵向波
+- 法向入射平面纵波
 - 有限厚度分层体
+- 横向无限或等效横向受限层内状态
 - 零厚度法向弹簧界面
 - 左右半空间阻抗端接
 

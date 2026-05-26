@@ -66,10 +66,10 @@ def main() -> None:
 
     fig2 = plt.figure(figsize=(8, 4.5))
     for sample_name, result in sample_results.items():
-        plt.plot(result.frequencies_hz * 1e-6, result.input_impedance_magnitude, label=sample_name)
+        plt.plot(result.frequencies_hz * 1e-6, np.log10(result.input_impedance_magnitude), label=sample_name)
     plt.xlabel("Frequency (MHz)")
-    plt.ylabel(r"$|Z_{in}(\omega)|$")
-    plt.title(f"Input impedance magnitude comparison ({left_medium.name} -> {right_medium.name})")
+    plt.ylabel(r"$\log_{10}(Z_{in}(\omega))$")
+    plt.title(f"Input impedance (log scale) comparison ({left_medium.name} -> {right_medium.name})")
     plt.legend()
     plt.tight_layout()
     fig2.savefig(output_dir / "input_impedance_comparison.png", dpi=180)

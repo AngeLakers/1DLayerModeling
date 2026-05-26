@@ -13,7 +13,7 @@ MediumLike = Union[float, HalfSpaceMedium]
 
 
 class Layer:
-    """1D longitudinal layer.
+    """Finite-thickness layer for normal plane longitudinal waves.
 
     Parameters
     ----------
@@ -60,6 +60,17 @@ class Layer:
                     "Provide either material, or both density and young_modulus. "
                     "Preferred API: Layer(..., material=Material(...))."
                 )
+            if poisson_ratio is None:
+                raise ValueError(
+                    "poisson_ratio must be provided for legacy Layer construction. "
+                    "Preferred API: Layer(..., material=Material(...))."
+                )
+            try:
+                poisson_ratio_value = float(poisson_ratio)
+            except (TypeError, ValueError):
+                raise ValueError("poisson_ratio must be finite for legacy Layer construction.") from None
+            if not math.isfinite(poisson_ratio_value):
+                raise ValueError("poisson_ratio must be finite for legacy Layer construction.")
             warnings.warn(
                 "Layer(..., density=..., young_modulus=...) is supported for compatibility; "
                 "prefer Layer(..., material=Material(...)).",
@@ -70,7 +81,7 @@ class Layer:
                 density=float(density),
                 young_modulus=float(young_modulus),
                 name=name,
-                poisson_ratio=poisson_ratio,
+                poisson_ratio=poisson_ratio_value,
                 attenuation_alpha=attenuation_alpha,
                 notes=notes,
             )
@@ -96,6 +107,14 @@ class Layer:
         return self.material.poisson_ratio
 
     @property
+    def shear_modulus(self) -> float:
+        return self.material.shear_modulus
+
+    @property
+    def longitudinal_modulus(self) -> float:
+        return self.material.longitudinal_modulus
+
+    @property
     def attenuation_alpha(self) -> Optional[float]:
         return self.material.attenuation_alpha
 
@@ -105,8 +124,12 @@ class Layer:
 
     @property
     def longitudinal_wave_speed(self) -> float:
-        # NOTE: Delegates to material longitudinal wave speed (P-wave speed).
+        # NOTE: Delegates to material normal plane longitudinal wave speed.
         return self.material.longitudinal_wave_speed
+
+    @property
+    def shear_wave_speed(self) -> float:
+        return self.material.shear_wave_speed
 
     @property
     def wave_speed(self) -> float:

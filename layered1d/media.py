@@ -10,11 +10,11 @@ import warnings
 class HalfSpaceMedium:
     """Semi-infinite medium attached to a structural port.
 
-    ``longitudinal_wave_speed`` means longitudinal wave speed (P-wave speed), in m/s.
+    ``longitudinal_wave_speed`` means normal plane longitudinal wave speed, in m/s.
     """
 
     density: Optional[float] = None
-    longitudinal_wave_speed: Optional[float] = None  # Longitudinal wave speed (P-wave speed), m/s.
+    longitudinal_wave_speed: Optional[float] = None  # Normal plane longitudinal wave speed, m/s.
     acoustic_impedance: Optional[float] = None
     name: str = ""
 

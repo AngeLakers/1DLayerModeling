@@ -9,8 +9,19 @@ from layered1d import HalfSpaceMedium, InterfaceSpring, LaminatedStack, Layer
 from layered1d.materials import Material
 
 
-def isotropic_E_from_cl(rho: float, c_l: float, nu: float) -> float:
-    return rho * c_l * c_l * (1.0 + nu) * (1.0 - 2.0 * nu) / (1.0 - nu)
+def isotropic_E_from_normal_longitudinal_speed(
+    rho: float,
+    longitudinal_wave_speed: float,
+    nu: float,
+) -> float:
+    return (
+        rho
+        * longitudinal_wave_speed
+        * longitudinal_wave_speed
+        * (1.0 + nu)
+        * (1.0 - 2.0 * nu)
+        / (1.0 - nu)
+    )
 
 
 class PhysicsConsistencyTests(unittest.TestCase):
@@ -28,6 +39,14 @@ class PhysicsConsistencyTests(unittest.TestCase):
     def test_material_requires_poisson_ratio(self) -> None:
         with self.assertRaisesRegex(TypeError, "poisson_ratio"):
             Material(density=2700.0, young_modulus=70e9, name="Aluminum")
+        with self.assertRaisesRegex(ValueError, "poisson_ratio must be provided"):
+            Material(density=2700.0, young_modulus=70e9, poisson_ratio=None, name="Aluminum")
+
+    def test_layer_legacy_constructor_requires_poisson_ratio(self) -> None:
+        with self.assertRaisesRegex(ValueError, "poisson_ratio must be provided"):
+            Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9)
+        with self.assertRaisesRegex(ValueError, "poisson_ratio must be finite"):
+            Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, poisson_ratio=float("nan"))
 
     def test_layer_can_be_built_from_material_or_legacy_properties(self) -> None:
         material = Material(density=2700.0, young_modulus=70e9, poisson_ratio=0.33, name="Aluminum")
@@ -61,6 +80,9 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertEqual(layer.notes, "legacy path")
         self.assertGreater(layer.longitudinal_wave_speed, 0.0)
         self.assertGreater(layer.shear_wave_speed, 0.0)
+        self.assertEqual(layer.longitudinal_modulus, layer.material.longitudinal_modulus)
+        self.assertEqual(layer.shear_modulus, layer.material.shear_modulus)
+        self.assertEqual(layer.shear_wave_speed, layer.material.shear_wave_speed)
 
     def test_dynamic_stiffness_matches_low_frequency_static_limit(self) -> None:
         with self.assertWarns(FutureWarning):
@@ -81,8 +103,8 @@ class PhysicsConsistencyTests(unittest.TestCase):
     def test_dynamic_stiffness_regularizes_exact_sine_pole(self) -> None:
         rho = 1.0
         nu = 0.25
-        c_l = 1.0
-        E = isotropic_E_from_cl(rho, c_l, nu)
+        longitudinal_wave_speed = 1.0
+        E = isotropic_E_from_normal_longitudinal_speed(rho, longitudinal_wave_speed, nu)
         with self.assertWarns(FutureWarning):
             layer = Layer(thickness=1.0, density=rho, young_modulus=E, poisson_ratio=nu)
         omega = math.pi * layer.longitudinal_wave_speed / layer.thickness
@@ -138,8 +160,8 @@ class PhysicsConsistencyTests(unittest.TestCase):
     def test_reflection_is_zero_for_impedance_matched_single_layer(self) -> None:
         rho = 1000.0
         nu = 0.25
-        c_l = 1500.0
-        E = isotropic_E_from_cl(rho, c_l, nu)
+        longitudinal_wave_speed = 1500.0
+        E = isotropic_E_from_normal_longitudinal_speed(rho, longitudinal_wave_speed, nu)
         material = Material(density=rho, young_modulus=E, poisson_ratio=nu, name="Matched")
         layer = Layer.from_material(thickness=1.2e-3, material=material)
         water = HalfSpaceMedium(density=1000.0, longitudinal_wave_speed=1500.0, name="matched")

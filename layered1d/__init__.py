@@ -1,3 +1,4 @@
+from .attenuation import AttenuationLaw, ConstantAttenuation
 from .media import HalfSpaceMedium
 from .model import Layer, InterfaceSpring, LaminatedStack
 from .solver import FrequencyResponseResult
@@ -5,6 +6,8 @@ from .solver import FrequencyResponseResult
 __version__ = "1.2.1"
 
 __all__ = [
+    'AttenuationLaw',
+    'ConstantAttenuation',
     'HalfSpaceMedium',
     'Layer',
     'InterfaceSpring',

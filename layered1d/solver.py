@@ -7,6 +7,14 @@ import numpy as np
 
 @dataclass
 class FrequencyResponseResult:
+    """Frequency sweep output.
+
+    ``raw_solutions`` is retained as diagnostic data for debugging and
+    regression checks. New code should prefer the typed arrays and properties
+    such as ``reflection_coefficient``, ``input_impedance`` and
+    ``power_balance``.
+    """
+
     stack: Any
     frequencies_hz: np.ndarray
     nodal_displacements: np.ndarray

@@ -219,12 +219,13 @@ class PhysicsConsistencyTests(unittest.TestCase):
     def test_zero_incident_amplitude_returns_infinite_input_impedance(self) -> None:
         material = Material(density=1000.0, young_modulus=1.875e9, poisson_ratio=0.25)
         stack = LaminatedStack(layers=[Layer.from_material(thickness=1.0e-3, material=material)])
-        solution = stack.solve_frequency_point(
-            frequency_hz=0.5e6,
-            left_medium_impedance=1.5e6,
-            right_medium_impedance=1.5e6,
-            incident_displacement_amplitude=0.0,
-        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            solution = stack.solve_frequency_point(
+                frequency_hz=0.5e6,
+                left_medium_impedance=1.5e6,
+                right_medium_impedance=1.5e6,
+                incident_displacement_amplitude=0.0,
+            )
         self.assertTrue(np.isinf(solution["input_impedance"]))
 
     def test_reflection_is_zero_for_impedance_matched_single_layer(self) -> None:

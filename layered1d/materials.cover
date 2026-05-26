@@ -1,0 +1,65 @@
+    1: from __future__ import annotations
+       
+    1: from dataclasses import dataclass
+    1: from typing import Optional
+    1: import math
+       
+       
+    3: @dataclass(frozen=True)
+    2: class Material:
+    1:     """Isotropic solid material for normal plane longitudinal waves.
+       
+           Notes
+           -----
+           In the current solver, ``longitudinal_wave_speed`` is the normal plane
+           longitudinal wave speed for a laterally constrained / laterally infinite
+           isotropic layer. It is derived from the longitudinal modulus ``M``:
+       
+               M = E (1 - nu) / ((1 + nu) (1 - 2 nu))
+               longitudinal_wave_speed = sqrt(M / rho)
+       
+           This means ``young_modulus`` is *not* treated as the longitudinal modulus
+           ``M``. Optional fields are carried for organization and for future model
+           extensions.
+           """
+       
+    1:     density: float
+    1:     young_modulus: float
+    1:     poisson_ratio: float
+    1:     name: str = ""
+    1:     attenuation_alpha: Optional[float] = None
+    1:     notes: str = ""
+       
+    1:     def __post_init__(self) -> None:
+   17:         if not math.isfinite(self.density) or self.density <= 0:
+                   raise ValueError("density must be positive and finite.")
+   17:         if not math.isfinite(self.young_modulus) or self.young_modulus <= 0:
+                   raise ValueError("young_modulus must be positive and finite.")
+   17:         if self.poisson_ratio is None:
+    1:             raise ValueError("poisson_ratio must be provided and finite.")
+   16:         if (not math.isfinite(self.poisson_ratio)) or not (-1.0 < self.poisson_ratio < 0.5):
+                   raise ValueError("poisson_ratio must be finite and lie in (-1, 0.5).")
+   16:         if self.attenuation_alpha is not None:
+    1:             if not math.isfinite(self.attenuation_alpha) or self.attenuation_alpha < 0:
+                       raise ValueError("attenuation_alpha must be finite and non-negative when provided.")
+       
+    2:     @property
+    2:     def shear_modulus(self) -> float:
+    6:         return self.young_modulus / (2.0 * (1.0 + self.poisson_ratio))
+       
+    2:     @property
+    2:     def longitudinal_modulus(self) -> float:
+   57:         nu = self.poisson_ratio
+   57:         return self.young_modulus * (1.0 - nu) / ((1.0 + nu) * (1.0 - 2.0 * nu))
+       
+    2:     @property
+    2:     def shear_wave_speed(self) -> float:
+    4:         return math.sqrt(self.shear_modulus / self.density)
+       
+    2:     @property
+    2:     def longitudinal_wave_speed(self) -> float:
+   53:         return math.sqrt(self.longitudinal_modulus / self.density)
+       
+    2:     @property
+    2:     def impedance(self) -> float:
+   24:         return self.density * self.longitudinal_wave_speed

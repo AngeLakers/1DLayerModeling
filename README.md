@@ -23,6 +23,7 @@
 
 ```python
 from layered1d.materials import Material
+from layered1d import ConstantAttenuation
 
 aluminum = Material(
     density=2700.0,
@@ -35,6 +36,7 @@ polymer = Material(
     density=1200.0,
     young_modulus=3.0e9,
     poisson_ratio=0.40,
+    attenuation_law=ConstantAttenuation(50.0),
     name="Polymer",
 )
 ```
@@ -52,8 +54,13 @@ longitudinal_wave_speed = sqrt(M / ρ)
 
 - 因此这里的 `young_modulus` **不能**再被理解成平面应变 / 横向受限有效纵向模量 `M` 或 `c11`
 - `poisson_ratio` 现在是计算层内纵波速度的必要参数，不应再默认偷设为 `0`
-- 当前法向平面波求解器真正参与层内波速计算的是 `density + young_modulus + poisson_ratio`
-- `attenuation_alpha`、`notes` 目前仍主要用于组织化管理和后续扩展
+- 当前法向平面波求解器真正参与层内计算的是 `density + young_modulus + poisson_ratio`，以及可选的 `attenuation_law`
+- `attenuation_law` 表示层内衰减规律；当前默认实现是 `ConstantAttenuation(alpha_np_per_m)`
+- `attenuation_alpha` 仍作为兼容旧写法的快捷参数，等价于 `ConstantAttenuation(attenuation_alpha)`
+- 若 `attenuation_law` 和 `attenuation_alpha` 都为 `None`，则层内传播按无耗处理
+- 当前版本先采用常数衰减规律，不引入频率幂律
+- 在当前求解器的右行传播约定 `exp(-j k z)` 下，衰减通过 `k*=omega/c-j alpha` 引入
+- `notes` 目前仍主要用于组织化管理和后续扩展
 
 另外，`Material` 还提供：
 
@@ -110,6 +117,14 @@ layer = Layer(thickness=1.0e-3, material=aluminum, name="Al-1")
 
 如果你同时传 `material` 和 `density / young_modulus / poisson_ratio`，代码会直接报错。
 
+兼容接口保留策略：
+
+- `Layer(...)` 直接传 `density / young_modulus / poisson_ratio` 的旧构造方式暂时保留，但会给出 `FutureWarning`；衰减模型稳定后再决定是否移除
+- `Layer.wave_speed` 和 `HalfSpaceMedium.wave_speed` 作为旧别名保留，但会给出 `FutureWarning`；新代码应使用 `longitudinal_wave_speed`
+- `Layer.from_material(...)`、`HalfSpaceMedium.from_impedance(...)` 和 `Material` 派生属性继续保留
+- `notes` 继续作为材料元数据保留，不参与当前数值求解
+- `FrequencyResponseResult.raw_solutions` 继续保留为诊断 / 回归检查数据；常规分析优先使用 `reflection_coefficient`、`input_impedance`、`interface_jumps`、`power_balance` 等结构化结果
+
 ---
 
 ## 3. 左右半空间介质
@@ -140,8 +155,11 @@ result = stack.solve_sweep(
 
 ## 4. 代码结构
 
+- `layered1d/attenuation.py`
+  - `ConstantAttenuation`：常数幅值衰减规律
+  - `AttenuationLaw`：衰减规律接口
 - `layered1d/materials.py`
-  - `Material`：各向同性固体层材料对象
+  - `Material`：各向同性固体层材料对象，并持有可选衰减规律
 - `layered1d/media.py`
   - `HalfSpaceMedium`：半无限边界介质
 - `layered1d/model.py`
@@ -153,8 +171,17 @@ result = stack.solve_sweep(
   - `FrequencyResponseResult`
 - `examples/basic_demo.py`
   - 使用 `Material + Layer.from_material(...)` 的示例
+- `examples/attenuation_demo.py`
+  - 对比不同层内常数衰减系数下的反射、输入阻抗、界面位移跳量与功率平衡
 - `tests/test_physics_consistency.py`
   - 物理一致性与接口兼容性测试
+
+示例可从仓库根目录用模块方式运行：
+
+```bash
+python -m examples.basic_demo
+python -m examples.attenuation_demo
+```
 
 ---
 
@@ -170,6 +197,9 @@ python -m unittest discover -s tests -v
 
 - `Material` 派生纵波速度、横波速度与阻抗
 - `Layer.from_material(...)` 与 legacy 构造方式等价
+- `attenuation_alpha=None` 与 `attenuation_alpha=0.0` 的无耗等价性
+- `ConstantAttenuation` 被 `Material` 持有后能驱动 `Layer.wavenumber(...)`
+- 有耗层复波数、传播因子衰减和功率平衡下降
 - 低频静态极限对应平面应变 / 横向受限条件下的有效纵向刚度 `M / h`
 - 阻抗匹配零反射
 - 介质对象 / 标量阻抗等价
@@ -180,9 +210,9 @@ python -m unittest discover -s tests -v
 - 振幅往返一致性
 - 场恢复边界一致性
 - 构造器参数校验
-- `HalfSpaceMedium` 的阻抗直设、`from_impedance(...)` 工厂方法和 `wave_speed` legacy alias
+- `HalfSpaceMedium` 的阻抗直设、`from_impedance(...)` 工厂方法和 `wave_speed` legacy alias 警告
 - 半空间介质非法输入、速度别名冲突和阻抗不一致校验
-- `Layer` 厚度、material / legacy 参数互斥和边界阻抗参数校验
+- `Layer` 厚度、material / legacy 参数互斥、`wave_speed` legacy alias 警告和边界阻抗参数校验
 - 零入射振幅下输入阻抗返回无穷大的边界情况
 
 ---
@@ -196,6 +226,7 @@ python -m unittest discover -s tests -v
 - 横向无限或等效横向受限层内状态
 - 零厚度法向弹簧界面
 - 左右半空间阻抗端接
+- 经验型常数传播衰减，通过复波数 `k*=omega/c-j alpha` 引入
 
 因此它不是：
 
@@ -203,6 +234,7 @@ python -m unittest discover -s tests -v
 - 任意角入射模型
 - 含剪切、模态转换、各向异性板理论的完整模型
 - 含换能器、耦合层、电学链条的完整测量模型
+- 复模量、频散、界面阻尼或 Biot 多孔介质耗散模型
 
 ---
 

@@ -61,12 +61,15 @@ longitudinal_wave_speed = sqrt(M / ρ)
 - `poisson_ratio` 现在是计算层内纵波速度的必要参数，不应再默认偷设为 `0`
 - 当前法向平面波求解器真正参与层内计算的是 `density + young_modulus + poisson_ratio`，以及可选的 `attenuation`
 - `attenuation` 表示层内衰减规律；当前实现包含 `ConstantAttenuation(alpha_np_per_m)` 和 `PowerLawAttenuation(alpha_ref, ref_frequency_hz=20e6, power=1.0, unit="Np/m")`
+- `ConstantAttenuation(alpha_np_per_m)` 是常数幅值衰减，单位为 `Np/m`
+- `PowerLawAttenuation(alpha_ref, ref_frequency_hz, power, unit)` 是频率相关幅值衰减
 - `attenuation_alpha` 仍作为兼容旧写法的快捷参数，等价于 `ConstantAttenuation(attenuation_alpha)`
 - `attenuation_law` 仍作为旧别名保留，但推荐新代码使用 `attenuation`
 - 若 `attenuation`、`attenuation_law` 和 `attenuation_alpha` 都为 `None`，则层内传播按无耗处理
 - 幂律衰减按 `alpha(f)=alpha_ref*(f/ref_frequency_hz)**power` 计算，所有模型最终统一输出 `Np/m`
 - 当 `unit="dB/mm"` 时，幅值衰减换算为 `alpha_Np/m = alpha_dB/mm * ln(10) / 20 * 1000`
-- 在当前求解器的右行传播约定 `exp(-j k z)` 下，衰减通过 `k*=omega/c-j alpha` 引入
+- 在当前求解器的右行传播约定 `exp(-j k z)` 下，衰减通过 `k = k_real - j alpha` 引入
+- 衰减是层内传播损耗，不是界面阻尼，也不是当前反演目标
 - `notes` 目前仍主要用于组织化管理和后续扩展
 
 另外，`Material` 还提供：
@@ -163,8 +166,8 @@ result = stack.solve_sweep(
 ## 4. 代码结构
 
 - `layered1d/attenuation.py`
-  - `ConstantAttenuation`：常数幅值衰减规律
-  - `PowerLawAttenuation`：频率幂律幅值衰减规律，支持 `Np/m` 和 `dB/mm`
+  - `ConstantAttenuation(alpha_np_per_m)`：常数幅值衰减规律，单位 `Np/m`
+  - `PowerLawAttenuation(alpha_ref, ref_frequency_hz, power, unit)`：频率幂律幅值衰减规律，支持 `Np/m` 和 `dB/mm`
   - `AttenuationLaw`：衰减规律接口
 - `layered1d/materials.py`
   - `Material`：各向同性固体层材料对象，并持有可选衰减规律
@@ -178,9 +181,13 @@ result = stack.solve_sweep(
 - `layered1d/solver.py`
   - `FrequencyResponseResult`
 - `examples/basic_demo.py`
-  - 使用 `Material + Layer.from_material(...)` 的示例
+  - 无损耗基础示例：多层结构、零厚度界面弹簧、反射谱与输入阻抗
+- `examples/constant_attenuation_demo.py`
+  - 常数衰减机制示例：对比 0、20、80 `Np/m`
+- `examples/power_law_attenuation_demo.py`
+  - 频率幂律衰减机制示例：输出 `alpha(f)` 曲线、反射、输入阻抗、界面位移跳量与功率平衡
 - `examples/attenuation_demo.py`
-  - 对比常数衰减和频率相关幂律衰减下的反射、输入阻抗、界面位移跳量与功率平衡
+  - 旧入口提示脚本；推荐直接运行拆分后的两个衰减 demo
 - `tests/test_physics_consistency.py`
   - 物理一致性与接口兼容性测试
 
@@ -188,7 +195,8 @@ result = stack.solve_sweep(
 
 ```bash
 python -m examples.basic_demo
-python -m examples.attenuation_demo
+python -m examples.constant_attenuation_demo
+python -m examples.power_law_attenuation_demo
 ```
 
 ---
@@ -208,6 +216,7 @@ python -m unittest discover -s tests -v
 - `attenuation_alpha=None` 与 `attenuation_alpha=0.0` 的无耗等价性
 - `ConstantAttenuation` 被 `Material` 持有后能驱动 `Layer.wavenumber(...)`
 - `PowerLawAttenuation` 的参考频率、频率趋势、`dB/mm` 到 `Np/m` 幅值换算和非法参数校验
+- `PowerLawAttenuation.alpha(omega)` 与 `np_per_m(frequency_hz)` 的角频率 / 频率入口一致性
 - 有耗层复波数、传播因子衰减和功率平衡下降
 - 低频静态极限对应平面应变 / 横向受限条件下的有效纵向刚度 `M / h`
 - 阻抗匹配零反射

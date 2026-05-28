@@ -166,6 +166,14 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertAlmostEqual(db_law.np_per_m(20e6), expected_ref)
         self.assertAlmostEqual(db_law.np_per_m(10e6), expected_ref * 0.5)
 
+    def test_power_law_alpha_matches_np_per_m_at_angular_frequency(self) -> None:
+        """v1.2.2 衰减规律：PowerLawAttenuation.alpha(omega) 兼容角频率入口。"""
+        law = PowerLawAttenuation(alpha_ref=0.10, ref_frequency_hz=20e6, power=1.0, unit="dB/mm")
+        omega = 2.0 * math.pi * 20e6
+        self.assertAlmostEqual(law.alpha(omega), law.np_per_m(20e6))
+        with self.assertRaisesRegex(ValueError, "omega"):
+            law.alpha(-omega)
+
     def test_power_law_attenuation_frequency_trend_and_constant_limit(self) -> None:
         """v1.2.2 衰减规律：power=0 为常数，正幂律高频衰减更强。"""
         constant_limit = PowerLawAttenuation(alpha_ref=30.0, ref_frequency_hz=20e6, power=0.0)

@@ -63,6 +63,11 @@ class PowerLawAttenuation:
             alpha_ref_np_per_m = self.alpha_ref * math.log(10.0) / 20.0 * 1000.0
         return alpha_ref_np_per_m * (frequency_hz / self.ref_frequency_hz) ** self.power
 
+    def alpha(self, omega: float) -> float:
+        if not math.isfinite(omega) or omega < 0:
+            raise ValueError("omega must be finite and non-negative.")
+        return self.np_per_m(omega / (2.0 * math.pi))
+
 
 def _validate_frequency_hz(frequency_hz: float) -> float:
     if not math.isfinite(frequency_hz) or frequency_hz < 0:

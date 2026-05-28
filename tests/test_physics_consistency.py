@@ -5,7 +5,14 @@ import unittest
 
 import numpy as np
 
-from layered1d import ConstantAttenuation, HalfSpaceMedium, InterfaceSpring, LaminatedStack, Layer
+from layered1d import (
+    ConstantAttenuation,
+    HalfSpaceMedium,
+    InterfaceSpring,
+    LaminatedStack,
+    Layer,
+    PowerLawAttenuation,
+)
 from layered1d.materials import Material
 
 
@@ -116,17 +123,30 @@ class PhysicsConsistencyTests(unittest.TestCase):
             density=1200.0,
             young_modulus=2.2e9,
             poisson_ratio=0.35,
-            attenuation_law=ConstantAttenuation(12.0),
+            attenuation=ConstantAttenuation(12.0),
         )
         layer = Layer.from_material(thickness=1.0e-3, material=material)
         omega = 2.0 * math.pi * 0.7e6
         self.assertEqual(material.attenuation_alpha, 12.0)
+        self.assertEqual(material.attenuation_np_per_m(0.7e6), 12.0)
         self.assertEqual(material.attenuation_coefficient(omega), 12.0)
         self.assertEqual(layer.wavenumber(omega).imag, -12.0)
 
+    def test_material_accepts_legacy_attenuation_law_alias(self) -> None:
+        """v1.2.2 衰减规律：旧 attenuation_law 入口仍兼容但提示弃用。"""
+        with self.assertWarns(FutureWarning):
+            material = Material(
+                density=1200.0,
+                young_modulus=2.2e9,
+                poisson_ratio=0.35,
+                attenuation_law=ConstantAttenuation(12.0),
+            )
+        self.assertIs(material.attenuation, material.attenuation_law)
+        self.assertEqual(material.attenuation_np_per_m(1.0e6), 12.0)
+
     def test_material_rejects_duplicate_attenuation_configuration(self) -> None:
-        """v1.2.2 衰减规律：不能同时传 attenuation_alpha 和 attenuation_law。"""
-        with self.assertRaisesRegex(ValueError, "either attenuation_alpha or attenuation_law"):
+        """v1.2.2 衰减规律：新旧衰减入口三者最多只能提供一个。"""
+        with self.assertRaisesRegex(ValueError, "at most one"):
             Material(
                 density=1200.0,
                 young_modulus=2.2e9,
@@ -134,6 +154,68 @@ class PhysicsConsistencyTests(unittest.TestCase):
                 attenuation_alpha=12.0,
                 attenuation_law=ConstantAttenuation(12.0),
             )
+
+    def test_power_law_attenuation_units_and_reference_frequency(self) -> None:
+        """v1.2.2 衰减规律：幂律模型使用 Hz 参考频率并统一输出 Np/m。"""
+        law = PowerLawAttenuation(alpha_ref=20.0, ref_frequency_hz=20e6, power=1.0, unit="Np/m")
+        self.assertEqual(law.np_per_m(20e6), 20.0)
+        self.assertEqual(law.np_per_m(10e6), 10.0)
+
+        db_law = PowerLawAttenuation(alpha_ref=0.10, ref_frequency_hz=20e6, power=1.0, unit="dB/mm")
+        expected_ref = 0.10 * math.log(10.0) / 20.0 * 1000.0
+        self.assertAlmostEqual(db_law.np_per_m(20e6), expected_ref)
+        self.assertAlmostEqual(db_law.np_per_m(10e6), expected_ref * 0.5)
+
+    def test_power_law_attenuation_frequency_trend_and_constant_limit(self) -> None:
+        """v1.2.2 衰减规律：power=0 为常数，正幂律高频衰减更强。"""
+        constant_limit = PowerLawAttenuation(alpha_ref=30.0, ref_frequency_hz=20e6, power=0.0)
+        self.assertEqual(constant_limit.np_per_m(0.0), 30.0)
+        self.assertEqual(constant_limit.np_per_m(1.0e3), 30.0)
+        self.assertEqual(constant_limit.np_per_m(20e6), 30.0)
+
+        law = PowerLawAttenuation(alpha_ref=30.0, ref_frequency_hz=20e6, power=1.0)
+        self.assertLess(law.np_per_m(1.0e3), law.np_per_m(20e6))
+        self.assertGreater(law.np_per_m(40e6), law.np_per_m(20e6))
+
+    def test_attenuation_law_rejects_invalid_values(self) -> None:
+        """v1.2.2 衰减规律：拒绝非法单位、频率和负参数。"""
+        with self.assertRaisesRegex(ValueError, "alpha_ref"):
+            PowerLawAttenuation(alpha_ref=-1.0)
+        with self.assertRaisesRegex(ValueError, "ref_frequency_hz"):
+            PowerLawAttenuation(alpha_ref=1.0, ref_frequency_hz=0.0)
+        with self.assertRaisesRegex(ValueError, "power"):
+            PowerLawAttenuation(alpha_ref=1.0, power=-1.0)
+        with self.assertRaisesRegex(ValueError, "unit"):
+            PowerLawAttenuation(alpha_ref=1.0, unit="dB/m")
+        with self.assertRaisesRegex(ValueError, "frequency_hz"):
+            PowerLawAttenuation(alpha_ref=1.0).np_per_m(-1.0)
+        with self.assertRaisesRegex(ValueError, "alpha_np_per_m"):
+            ConstantAttenuation(-1.0)
+        with self.assertRaisesRegex(ValueError, "frequency_hz"):
+            ConstantAttenuation(1.0).np_per_m(-1.0)
+
+    def test_layer_wavenumber_uses_frequency_dependent_attenuation(self) -> None:
+        """v1.2.2 衰减规律：Layer 通过 Material 按频率取得 alpha(f)。"""
+        material = Material(
+            density=1200.0,
+            young_modulus=2.2e9,
+            poisson_ratio=0.35,
+            attenuation=PowerLawAttenuation(alpha_ref=20.0, ref_frequency_hz=1.0e6, power=2.0),
+        )
+        layer = Layer.from_material(thickness=1.0e-3, material=material)
+        omega = 2.0 * math.pi * 2.0e6
+        k = layer.wavenumber(omega)
+        self.assertEqual(material.attenuation_np_per_m(2.0e6), 80.0)
+        self.assertEqual(k.imag, -80.0)
+
+    def test_wavenumber_rejects_negative_omega(self) -> None:
+        """v1.2.2 衰减规律：负角频率不是当前正频谐波响应入口。"""
+        material = Material(density=1200.0, young_modulus=2.2e9, poisson_ratio=0.35)
+        layer = Layer.from_material(thickness=1.0e-3, material=material)
+        with self.assertRaisesRegex(ValueError, "omega"):
+            layer.wavenumber(-1.0)
+        with self.assertRaisesRegex(ValueError, "omega"):
+            material.attenuation_coefficient(-1.0)
 
     def test_positive_attenuation_sets_passive_complex_wavenumber(self) -> None:
         """v1.2.2 衰减模型：正 alpha 应映射为被动复波数。"""
@@ -147,7 +229,8 @@ class PhysicsConsistencyTests(unittest.TestCase):
         material = Material(density=1200.0, young_modulus=2.2e9, poisson_ratio=0.35, attenuation_alpha=50.0)
         layer = Layer.from_material(thickness=1.0e-3, material=material)
         k = layer.wavenumber(2.0 * math.pi * 0.7e6)
-        self.assertLess(abs(np.exp(-1j * k * layer.thickness)), 1.0)
+        project_sign = -1.0
+        self.assertLessEqual(abs(np.exp(project_sign * 1j * k * layer.thickness)), 1.0)
 
     def test_attenuated_layer_power_balance_is_below_lossless_case(self) -> None:
         """v1.2.2 衰减模型：有耗传播应降低反射加透射功率和。"""

@@ -23,7 +23,7 @@
 
 ```python
 from layered1d.materials import Material
-from layered1d import ConstantAttenuation
+from layered1d import PowerLawAttenuation
 
 aluminum = Material(
     density=2700.0,
@@ -36,7 +36,12 @@ polymer = Material(
     density=1200.0,
     young_modulus=3.0e9,
     poisson_ratio=0.40,
-    attenuation_law=ConstantAttenuation(50.0),
+    attenuation=PowerLawAttenuation(
+        alpha_ref=0.10,
+        ref_frequency_hz=20e6,
+        power=1.0,
+        unit="dB/mm",
+    ),
     name="Polymer",
 )
 ```
@@ -54,11 +59,13 @@ longitudinal_wave_speed = sqrt(M / ρ)
 
 - 因此这里的 `young_modulus` **不能**再被理解成平面应变 / 横向受限有效纵向模量 `M` 或 `c11`
 - `poisson_ratio` 现在是计算层内纵波速度的必要参数，不应再默认偷设为 `0`
-- 当前法向平面波求解器真正参与层内计算的是 `density + young_modulus + poisson_ratio`，以及可选的 `attenuation_law`
-- `attenuation_law` 表示层内衰减规律；当前默认实现是 `ConstantAttenuation(alpha_np_per_m)`
+- 当前法向平面波求解器真正参与层内计算的是 `density + young_modulus + poisson_ratio`，以及可选的 `attenuation`
+- `attenuation` 表示层内衰减规律；当前实现包含 `ConstantAttenuation(alpha_np_per_m)` 和 `PowerLawAttenuation(alpha_ref, ref_frequency_hz=20e6, power=1.0, unit="Np/m")`
 - `attenuation_alpha` 仍作为兼容旧写法的快捷参数，等价于 `ConstantAttenuation(attenuation_alpha)`
-- 若 `attenuation_law` 和 `attenuation_alpha` 都为 `None`，则层内传播按无耗处理
-- 当前版本先采用常数衰减规律，不引入频率幂律
+- `attenuation_law` 仍作为旧别名保留，但推荐新代码使用 `attenuation`
+- 若 `attenuation`、`attenuation_law` 和 `attenuation_alpha` 都为 `None`，则层内传播按无耗处理
+- 幂律衰减按 `alpha(f)=alpha_ref*(f/ref_frequency_hz)**power` 计算，所有模型最终统一输出 `Np/m`
+- 当 `unit="dB/mm"` 时，幅值衰减换算为 `alpha_Np/m = alpha_dB/mm * ln(10) / 20 * 1000`
 - 在当前求解器的右行传播约定 `exp(-j k z)` 下，衰减通过 `k*=omega/c-j alpha` 引入
 - `notes` 目前仍主要用于组织化管理和后续扩展
 
@@ -157,6 +164,7 @@ result = stack.solve_sweep(
 
 - `layered1d/attenuation.py`
   - `ConstantAttenuation`：常数幅值衰减规律
+  - `PowerLawAttenuation`：频率幂律幅值衰减规律，支持 `Np/m` 和 `dB/mm`
   - `AttenuationLaw`：衰减规律接口
 - `layered1d/materials.py`
   - `Material`：各向同性固体层材料对象，并持有可选衰减规律
@@ -172,7 +180,7 @@ result = stack.solve_sweep(
 - `examples/basic_demo.py`
   - 使用 `Material + Layer.from_material(...)` 的示例
 - `examples/attenuation_demo.py`
-  - 对比不同层内常数衰减系数下的反射、输入阻抗、界面位移跳量与功率平衡
+  - 对比常数衰减和频率相关幂律衰减下的反射、输入阻抗、界面位移跳量与功率平衡
 - `tests/test_physics_consistency.py`
   - 物理一致性与接口兼容性测试
 
@@ -199,6 +207,7 @@ python -m unittest discover -s tests -v
 - `Layer.from_material(...)` 与 legacy 构造方式等价
 - `attenuation_alpha=None` 与 `attenuation_alpha=0.0` 的无耗等价性
 - `ConstantAttenuation` 被 `Material` 持有后能驱动 `Layer.wavenumber(...)`
+- `PowerLawAttenuation` 的参考频率、频率趋势、`dB/mm` 到 `Np/m` 幅值换算和非法参数校验
 - 有耗层复波数、传播因子衰减和功率平衡下降
 - 低频静态极限对应平面应变 / 横向受限条件下的有效纵向刚度 `M / h`
 - 阻抗匹配零反射
@@ -226,7 +235,7 @@ python -m unittest discover -s tests -v
 - 横向无限或等效横向受限层内状态
 - 零厚度法向弹簧界面
 - 左右半空间阻抗端接
-- 经验型常数传播衰减，通过复波数 `k*=omega/c-j alpha` 引入
+- 经验型层内传播衰减，可为常数或频率幂律，通过复波数 `k*=omega/c-j alpha(f)` 引入
 
 因此它不是：
 

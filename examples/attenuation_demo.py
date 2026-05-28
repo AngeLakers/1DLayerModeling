@@ -6,25 +6,33 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from layered1d import ConstantAttenuation, HalfSpaceMedium, InterfaceSpring, LaminatedStack, Layer
+from layered1d import (
+    AttenuationLaw,
+    ConstantAttenuation,
+    HalfSpaceMedium,
+    InterfaceSpring,
+    LaminatedStack,
+    Layer,
+    PowerLawAttenuation,
+)
 from layered1d.materials import Material
 
 
-def build_stack(polymer_attenuation_alpha: float) -> LaminatedStack:
+def build_stack(polymer_attenuation: AttenuationLaw) -> LaminatedStack:
     aluminum = Material(
         density=2700.0,
         young_modulus=70e9,
         poisson_ratio=0.33,
-        attenuation_alpha=0.0,
+        attenuation=ConstantAttenuation(0.0),
         name="Aluminum",
     )
     polymer = Material(
         density=1200.0,
         young_modulus=3.0e9,
         poisson_ratio=0.40,
-        attenuation_law=ConstantAttenuation(polymer_attenuation_alpha),
+        attenuation=polymer_attenuation,
         name="Polymer",
-        notes="attenuation_alpha is illustrative and is not a calibrated material value.",
+        notes="attenuation is illustrative and is not a calibrated material value.",
     )
     layers = [
         Layer.from_material(thickness=1.0e-3, material=aluminum, name="Al-1"),
@@ -40,9 +48,14 @@ def build_stack(polymer_attenuation_alpha: float) -> LaminatedStack:
 
 def main() -> None:
     attenuation_cases = {
-        "lossless (0 Np/m)": 0.0,
-        "moderate (20 Np/m)": 20.0,
-        "high (80 Np/m)": 80.0,
+        "lossless (0 Np/m)": ConstantAttenuation(0.0),
+        "constant (20 Np/m)": ConstantAttenuation(20.0),
+        "power law (0.10 dB/mm @ 20 MHz)": PowerLawAttenuation(
+            alpha_ref=0.10,
+            ref_frequency_hz=20e6,
+            power=1.0,
+            unit="dB/mm",
+        ),
     }
     left_medium = HalfSpaceMedium(density=1000.0, longitudinal_wave_speed=1480.0, name="Water")
     right_medium = HalfSpaceMedium(density=7850.0, longitudinal_wave_speed=5900.0, name="Steel")
@@ -53,8 +66,8 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     results = {}
-    for label, alpha in attenuation_cases.items():
-        stack = build_stack(polymer_attenuation_alpha=alpha)
+    for label, attenuation in attenuation_cases.items():
+        stack = build_stack(polymer_attenuation=attenuation)
         results[label] = stack.solve_sweep(
             freqs,
             left_medium=left_medium,

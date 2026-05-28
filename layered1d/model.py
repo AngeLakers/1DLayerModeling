@@ -145,8 +145,11 @@ class Layer:
         return self.material.impedance
 
     def wavenumber(self, omega: float) -> complex:
+        if not math.isfinite(omega) or omega < 0:
+            raise ValueError("omega must be finite and non-negative.")
         k_real = omega / self.longitudinal_wave_speed
-        alpha = self.material.attenuation_coefficient(omega)
+        frequency_hz = omega / (2.0 * math.pi)
+        alpha = self.material.attenuation_np_per_m(frequency_hz)
         return complex(k_real, -alpha)
 
     def dynamic_stiffness(self, omega: float) -> np.ndarray:

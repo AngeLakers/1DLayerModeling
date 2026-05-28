@@ -22,7 +22,7 @@ def main() -> None:
         young_modulus=3.0e9,
         name="Polymer",
         poisson_ratio=0.40,
-        attenuation_law=ConstantAttenuation(50.0),
+        attenuation=ConstantAttenuation(50.0),
         notes="ConstantAttenuation(50.0) is illustrative and is not a calibrated material value.",
     )
 

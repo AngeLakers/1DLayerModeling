@@ -21,7 +21,7 @@ def isotropic_E_from_normal_longitudinal_speed(
     longitudinal_wave_speed: float,
     nu: float,
 ) -> float:
-    """v1.2.2 辅助函数：由法向纵波速度反算杨氏模量。"""
+    """由法向纵波速度反算杨氏模量。"""
     return (
         rho
         * longitudinal_wave_speed
@@ -34,7 +34,7 @@ def isotropic_E_from_normal_longitudinal_speed(
 
 class PhysicsConsistencyTests(unittest.TestCase):
     def test_material_derives_wave_speeds_and_impedance(self) -> None:
-        """v1.2.2 材料接口：检查派生模量、波速和阻抗。"""
+        """材料接口应正确派生模量、波速和阻抗。"""
         material = Material(
             density=2700.0,
             young_modulus=70e9,
@@ -46,21 +46,21 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertGreater(material.longitudinal_modulus, material.young_modulus)
 
     def test_material_requires_poisson_ratio(self) -> None:
-        """v1.2.2 材料校验：poisson_ratio 必须提供且为有限数。"""
+        """Material 应要求 poisson_ratio 必须提供且为有限数。"""
         with self.assertRaisesRegex(TypeError, "poisson_ratio"):
             Material(density=2700.0, young_modulus=70e9, name="Aluminum")
         with self.assertRaisesRegex(ValueError, "poisson_ratio must be provided"):
             Material(density=2700.0, young_modulus=70e9, poisson_ratio=None, name="Aluminum")
 
     def test_layer_legacy_constructor_requires_poisson_ratio(self) -> None:
-        """v1.2.2 旧版 Layer 构造校验：拒绝缺失或非有限 poisson_ratio。"""
+        """旧版 Layer 构造应拒绝缺失或非有限 poisson_ratio。"""
         with self.assertRaisesRegex(ValueError, "poisson_ratio must be provided"):
             Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9)
         with self.assertRaisesRegex(ValueError, "poisson_ratio must be finite"):
             Layer(thickness=1.0e-3, density=2700.0, young_modulus=70e9, poisson_ratio=float("nan"))
 
     def test_layer_can_be_built_from_material_or_legacy_properties(self) -> None:
-        """v1.2.2 Layer 构造：Material 路径和旧参数路径的动态刚度等价。"""
+        """Material 路径和旧参数路径的 Layer 动态刚度应等价。"""
         material = Material(density=2700.0, young_modulus=70e9, poisson_ratio=0.33, name="Aluminum")
         layer_from_material = Layer.from_material(thickness=1.0e-3, material=material, name="Al-1")
         with self.assertWarns(FutureWarning):
@@ -77,7 +77,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertEqual(layer_from_material.name, "Al-1")
 
     def test_layer_legacy_constructor_carries_material_metadata(self) -> None:
-        """v1.2.2 旧版 Layer 接口：保留材料元数据并代理材料属性。"""
+        """旧版 Layer 接口应保留材料元数据并代理材料属性。"""
         with self.assertWarns(FutureWarning):
             layer = Layer(
                 thickness=1.0e-3,
@@ -100,7 +100,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
             self.assertEqual(layer.wave_speed, layer.longitudinal_wave_speed)
 
     def test_zero_attenuation_matches_lossless_layer_response(self) -> None:
-        """v1.2.2 衰减模型：None 和 0.0 都表示无耗，响应应一致。"""
+        """None 和 0.0 衰减都表示无耗，响应应一致。"""
         material_kwargs = dict(density=1200.0, young_modulus=2.2e9, poisson_ratio=0.35, name="Polymer")
         lossless_none = Material(**material_kwargs, attenuation_alpha=None)
         lossless_zero = Material(**material_kwargs, attenuation_alpha=0.0)
@@ -118,7 +118,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         np.testing.assert_allclose(result_none.transmission_displacement_ratio, result_zero.transmission_displacement_ratio)
 
     def test_material_holds_constant_attenuation_law(self) -> None:
-        """v1.2.2 衰减规律：Material 持有常数衰减规律，Layer 只调用它。"""
+        """Material 应持有常数衰减规律，Layer 只调用它。"""
         material = Material(
             density=1200.0,
             young_modulus=2.2e9,
@@ -133,7 +133,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertEqual(layer.wavenumber(omega).imag, -12.0)
 
     def test_material_accepts_legacy_attenuation_law_alias(self) -> None:
-        """v1.2.2 衰减规律：旧 attenuation_law 入口仍兼容但提示弃用。"""
+        """旧 attenuation_law 入口仍兼容但应提示弃用。"""
         with self.assertWarns(FutureWarning):
             material = Material(
                 density=1200.0,
@@ -145,7 +145,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertEqual(material.attenuation_np_per_m(1.0e6), 12.0)
 
     def test_material_rejects_duplicate_attenuation_configuration(self) -> None:
-        """v1.2.2 衰减规律：新旧衰减入口三者最多只能提供一个。"""
+        """新旧衰减入口三者最多只能提供一个。"""
         with self.assertRaisesRegex(ValueError, "at most one"):
             Material(
                 density=1200.0,
@@ -156,7 +156,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
             )
 
     def test_power_law_attenuation_units_and_reference_frequency(self) -> None:
-        """v1.2.2 衰减规律：幂律模型使用 Hz 参考频率并统一输出 Np/m。"""
+        """幂律衰减模型应使用 Hz 参考频率并统一输出 Np/m。"""
         law = PowerLawAttenuation(alpha_ref=20.0, ref_frequency_hz=20e6, power=1.0, unit="Np/m")
         self.assertEqual(law.np_per_m(20e6), 20.0)
         self.assertEqual(law.np_per_m(10e6), 10.0)
@@ -167,7 +167,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertAlmostEqual(db_law.np_per_m(10e6), expected_ref * 0.5)
 
     def test_power_law_alpha_matches_np_per_m_at_angular_frequency(self) -> None:
-        """v1.2.2 衰减规律：PowerLawAttenuation.alpha(omega) 兼容角频率入口。"""
+        """PowerLawAttenuation.alpha(omega) 应兼容角频率入口。"""
         law = PowerLawAttenuation(alpha_ref=0.10, ref_frequency_hz=20e6, power=1.0, unit="dB/mm")
         omega = 2.0 * math.pi * 20e6
         self.assertAlmostEqual(law.alpha(omega), law.np_per_m(20e6))
@@ -175,7 +175,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
             law.alpha(-omega)
 
     def test_power_law_attenuation_frequency_trend_and_constant_limit(self) -> None:
-        """v1.2.2 衰减规律：power=0 为常数，正幂律高频衰减更强。"""
+        """power=0 应为常数衰减，正幂律应让高频衰减更强。"""
         constant_limit = PowerLawAttenuation(alpha_ref=30.0, ref_frequency_hz=20e6, power=0.0)
         self.assertEqual(constant_limit.np_per_m(0.0), 30.0)
         self.assertEqual(constant_limit.np_per_m(1.0e3), 30.0)
@@ -186,7 +186,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertGreater(law.np_per_m(40e6), law.np_per_m(20e6))
 
     def test_attenuation_law_rejects_invalid_values(self) -> None:
-        """v1.2.2 衰减规律：拒绝非法单位、频率和负参数。"""
+        """衰减规律应拒绝非法单位、频率和负参数。"""
         with self.assertRaisesRegex(ValueError, "alpha_ref"):
             PowerLawAttenuation(alpha_ref=-1.0)
         with self.assertRaisesRegex(ValueError, "ref_frequency_hz"):
@@ -203,7 +203,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
             ConstantAttenuation(1.0).np_per_m(-1.0)
 
     def test_layer_wavenumber_uses_frequency_dependent_attenuation(self) -> None:
-        """v1.2.2 衰减规律：Layer 通过 Material 按频率取得 alpha(f)。"""
+        """Layer 应通过 Material 按频率取得 alpha(f)。"""
         material = Material(
             density=1200.0,
             young_modulus=2.2e9,
@@ -217,7 +217,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertEqual(k.imag, -80.0)
 
     def test_wavenumber_rejects_negative_omega(self) -> None:
-        """v1.2.2 衰减规律：负角频率不是当前正频谐波响应入口。"""
+        """负角频率不是当前正频谐波响应入口。"""
         material = Material(density=1200.0, young_modulus=2.2e9, poisson_ratio=0.35)
         layer = Layer.from_material(thickness=1.0e-3, material=material)
         with self.assertRaisesRegex(ValueError, "omega"):
@@ -225,15 +225,8 @@ class PhysicsConsistencyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "omega"):
             material.attenuation_coefficient(-1.0)
 
-    def test_positive_attenuation_sets_passive_complex_wavenumber(self) -> None:
-        """v1.2.2 衰减模型：正 alpha 应映射为被动复波数。"""
-        material = Material(density=1200.0, young_modulus=2.2e9, poisson_ratio=0.35, attenuation_alpha=20.0)
-        layer = Layer.from_material(thickness=1.0e-3, material=material)
-        k = layer.wavenumber(2.0 * math.pi * 0.7e6)
-        self.assertEqual(k.imag, -20.0)
-
     def test_attenuated_propagation_factor_decays_with_depth(self) -> None:
-        """v1.2.2 衰减模型：右行传播因子应随传播深度衰减。"""
+        """右行传播因子应随传播深度衰减。"""
         material = Material(density=1200.0, young_modulus=2.2e9, poisson_ratio=0.35, attenuation_alpha=50.0)
         layer = Layer.from_material(thickness=1.0e-3, material=material)
         k = layer.wavenumber(2.0 * math.pi * 0.7e6)
@@ -241,7 +234,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertLessEqual(abs(np.exp(project_sign * 1j * k * layer.thickness)), 1.0)
 
     def test_attenuated_layer_power_balance_is_below_lossless_case(self) -> None:
-        """v1.2.2 衰减模型：有耗传播应降低反射加透射功率和。"""
+        """有耗传播应降低反射加透射功率和。"""
         lossless = Material(density=1000.0, young_modulus=1.875e9, poisson_ratio=0.25, attenuation_alpha=0.0)
         attenuated = Material(density=1000.0, young_modulus=1.875e9, poisson_ratio=0.25, attenuation_alpha=80.0)
         freqs = np.array([0.2e6, 0.8e6, 1.4e6])
@@ -259,7 +252,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertTrue(np.all(attenuated_result.power_balance < 1.0))
 
     def test_dynamic_stiffness_matches_low_frequency_static_limit(self) -> None:
-        """v1.2.2 动态刚度：低频极限应为有效纵向刚度 M/h。"""
+        """动态刚度低频极限应为有效纵向刚度 M/h。"""
         with self.assertWarns(FutureWarning):
             layer = Layer(
                 thickness=1.0e-3,
@@ -276,7 +269,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         np.testing.assert_allclose(k_dynamic, k_static, rtol=1e-9, atol=1e-3)
 
     def test_dynamic_stiffness_regularizes_exact_sine_pole(self) -> None:
-        """v1.2.2 动态刚度：精确正弦极点经正则化后仍应有限。"""
+        """精确正弦极点经正则化后仍应有限。"""
         rho = 1.0
         nu = 0.25
         longitudinal_wave_speed = 1.0
@@ -288,7 +281,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertTrue(np.isfinite(k_dynamic).all())
 
     def test_amplitude_roundtrip_matches_boundary_displacements(self) -> None:
-        """v1.2.2 波幅恢复：边界位移和行波幅值应可往返转换。"""
+        """边界位移和行波幅值应可往返转换。"""
         material = Material(density=1200.0, young_modulus=2.2e9, poisson_ratio=0.35, name="Polymer")
         layer = Layer.from_material(thickness=1.5e-3, material=material)
         omega = 2.0 * math.pi * 0.7e6
@@ -300,7 +293,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         np.testing.assert_allclose(rec_minus, a_minus)
 
     def test_field_respects_boundary_values_and_velocity_definition(self) -> None:
-        """v1.2.2 场恢复：边界位移和速度定义应保持一致。"""
+        """场恢复应保持边界位移和速度定义一致。"""
         with self.assertWarns(FutureWarning):
             layer = Layer(
                 thickness=2.0e-3,
@@ -318,14 +311,14 @@ class PhysicsConsistencyTests(unittest.TestCase):
         np.testing.assert_allclose(field["velocity"], -1j * omega * field["u"])
 
     def test_interface_spring_rejects_non_finite_or_non_positive_stiffness(self) -> None:
-        """v1.2.2 界面校验：界面刚度必须为有限正数。"""
+        """界面刚度必须为有限正数。"""
         with self.assertRaisesRegex(ValueError, "must be finite"):
             InterfaceSpring(stiffness=float("nan"))
         with self.assertRaisesRegex(ValueError, "must be positive"):
             InterfaceSpring(stiffness=0.0)
 
     def test_laminated_stack_constructor_validations(self) -> None:
-        """v1.2.2 层状结构校验：必须有层，并显式给出层间界面。"""
+        """层状结构必须有层，并显式给出层间界面。"""
         with self.assertRaisesRegex(ValueError, "At least one layer is required"):
             LaminatedStack(layers=[])
 
@@ -338,7 +331,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
             LaminatedStack(layers=layers, interfaces=[])
 
     def test_half_space_medium_impedance_paths_and_aliases(self) -> None:
-        """v1.2.2 半空间接口：阻抗直设、工厂方法和 wave_speed 旧别名。"""
+        """半空间接口应支持阻抗直设、工厂方法和 wave_speed 旧别名。"""
         impedance_only = HalfSpaceMedium(acoustic_impedance=1.8e6, name="Z-only")
         self.assertEqual(impedance_only.impedance, 1.8e6)
         with self.assertWarns(FutureWarning):
@@ -357,7 +350,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
             self.assertEqual(compatible_alias.wave_speed, compatible_alias.longitudinal_wave_speed)
 
     def test_half_space_medium_rejects_invalid_or_conflicting_inputs(self) -> None:
-        """v1.2.2 半空间校验：拒绝缺失、冲突或自相矛盾的输入。"""
+        """HalfSpaceMedium 应拒绝缺失、冲突或自相矛盾的输入。"""
         with self.assertRaisesRegex(ValueError, "Provide only one of wave_speed or longitudinal_wave_speed"):
             HalfSpaceMedium(density=1000.0, longitudinal_wave_speed=1500.0, wave_speed=1490.0)
 
@@ -375,7 +368,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
             )
 
     def test_layer_and_boundary_impedance_validation_edges(self) -> None:
-        """v1.2.2 边界校验：拒绝非法 Layer 和非法边界阻抗输入。"""
+        """Layer 和边界阻抗输入应拒绝非法值。"""
         material = Material(density=2700.0, young_modulus=70e9, poisson_ratio=0.33, name="Aluminum")
         with self.assertRaisesRegex(ValueError, "thickness must be positive and finite"):
             Layer.from_material(thickness=0.0, material=material)
@@ -402,7 +395,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
             stack.solve_frequency_point(0.5e6, left_medium_impedance=-1.0, right_medium_impedance=1.5e6)
 
     def test_zero_incident_amplitude_returns_infinite_input_impedance(self) -> None:
-        """v1.2.2 散射恢复：边界速度为零时输入阻抗应为无穷大。"""
+        """边界速度为零时输入阻抗应为无穷大。"""
         material = Material(density=1000.0, young_modulus=1.875e9, poisson_ratio=0.25)
         stack = LaminatedStack(layers=[Layer.from_material(thickness=1.0e-3, material=material)])
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -415,7 +408,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertTrue(np.isinf(solution["input_impedance"]))
 
     def test_reflection_is_zero_for_impedance_matched_single_layer(self) -> None:
-        """v1.2.2 物理一致性：阻抗匹配单层结构应无反射。"""
+        """阻抗匹配单层结构应无反射。"""
         rho = 1000.0
         nu = 0.25
         longitudinal_wave_speed = 1500.0
@@ -429,7 +422,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         self.assertLess(np.max(np.abs(result.reflection_coefficient)), 1e-10)
 
     def test_medium_object_matches_raw_impedance(self) -> None:
-        """v1.2.2 边界接口：HalfSpaceMedium 对象应等价于直接传阻抗。"""
+        """HalfSpaceMedium 对象应等价于直接传阻抗。"""
         with self.assertWarns(FutureWarning):
             layer = Layer(thickness=0.6e-3, density=2700.0, young_modulus=70e9, poisson_ratio=0.33)
         freqs = np.array([0.4e6, 1.1e6])
@@ -443,7 +436,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         np.testing.assert_allclose(result_obj.power_balance, result_raw.power_balance)
 
     def test_frequency_response_result_properties_and_layer_field(self) -> None:
-        """v1.2.2 结果对象：幅值、相位和无耗功率平衡属性应正确。"""
+        """结果对象的幅值、相位和无耗功率平衡属性应正确。"""
         material = Material(density=1000.0, young_modulus=1.875e9, poisson_ratio=0.25, name="WaterLike")
         layer = Layer.from_material(thickness=0.9e-3, material=material)
         stack = LaminatedStack(layers=[layer])
@@ -455,7 +448,7 @@ class PhysicsConsistencyTests(unittest.TestCase):
         np.testing.assert_allclose(result.power_balance, np.ones_like(result.power_balance), rtol=1e-9, atol=1e-9)
 
     def test_lossless_energy_balance_holds_for_real_boundary_impedances(self) -> None:
-        """v1.2.2 物理一致性：无耗且边界阻抗为实数时应功率守恒。"""
+        """无耗且边界阻抗为实数时应功率守恒。"""
         aluminum = Material(density=2700.0, young_modulus=70e9, poisson_ratio=0.33, name="Aluminum")
         polymer = Material(density=1200.0, young_modulus=3e9, poisson_ratio=0.40, name="Polymer")
         composite = Material(density=1600.0, young_modulus=8e9, poisson_ratio=0.30, name="Composite")

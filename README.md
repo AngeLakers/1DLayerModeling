@@ -66,7 +66,7 @@ longitudinal_wave_speed = sqrt(M / ρ)
 - `attenuation_alpha` 仍作为兼容旧写法的快捷参数，等价于 `ConstantAttenuation(attenuation_alpha)`
 - `attenuation_law` 仍作为旧别名保留，但推荐新代码使用 `attenuation`
 - 若 `attenuation`、`attenuation_law` 和 `attenuation_alpha` 都为 `None`，则层内传播按无耗处理
-- 幂律衰减按 `alpha(f)=alpha_ref*(f/ref_frequency_hz)**power` 计算，所有模型最终统一输出 `Np/m`
+- 幂律衰减按 `alpha(f)=alpha_ref_Np_per_m*(f/ref_frequency_hz)**power` 计算，所有模型最终统一输出 `Np/m`
 - 当 `unit="dB/mm"` 时，幅值衰减换算为 `alpha_Np/m = alpha_dB/mm * ln(10) / 20 * 1000`
 - 在当前求解器的右行传播约定 `exp(-j k z)` 下，衰减通过 `k = k_real - j alpha` 引入
 - 衰减是层内传播损耗，不是界面阻尼，也不是当前反演目标
@@ -244,7 +244,7 @@ python -m unittest discover -s tests -v
 - 横向无限或等效横向受限层内状态
 - 零厚度法向弹簧界面
 - 左右半空间阻抗端接
-- 经验型层内传播衰减，可为常数或频率幂律，通过复波数 `k*=omega/c-j alpha(f)` 引入
+- 经验型层内传播衰减，可为常数或频率幂律，通过复波数 `k = omega/c - j alpha(f)` 引入
 
 因此它不是：
 
@@ -265,7 +265,7 @@ python -m unittest discover -s tests -v
 3. 将“结构本体算子”和“端接/观测模型”进一步拆开
 4. 再上升到可辨识性分析和后验推断
 
-## 8.3 数值稳健性测试
+## 8. 数值稳健性测试
 
 现有测试已经覆盖材料参数派生、低频极限、阻抗匹配、无耗功率守恒、大刚度界面收敛和关键参数校验。后续面向反演或极端参数场景时，应继续补充数值稳健性测试。
 

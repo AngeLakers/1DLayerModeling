@@ -10,10 +10,12 @@
 
 - `layered1d.materials.Material`：层内材料参数对象
 - `HalfSpaceMedium`：左右半空间端接介质对象
+- `layered1d.adhesives.AdhesiveLayerPrior`：可复用胶层 / 聚合物层文献先验
 
-这两者不是一回事。
+这些对象不是一回事。
 `Material` 管的是**层本体**。
 `HalfSpaceMedium` 管的是**边界端接**。
+`AdhesiveLayerPrior` 管的是可复用先验参数，并可生成 `Material` 或 `Layer`。
 
 ---
 
@@ -82,6 +84,54 @@ longitudinal_wave_speed = sqrt(M / ρ)
 
 `Layer` 会代理这些常用材料属性，因此 `layer.longitudinal_modulus`、
 `layer.shear_modulus`、`layer.shear_wave_speed` 与 `layer.material` 上的同名属性一致。
+
+### 1.1.1 可复用胶层先验
+
+项目内置了 A1 默认胶层先验，供 demo、模型检查和报告复用：
+
+```python
+from layered1d import A1_DEFAULT_ADHESIVE_PRIOR, make_a1_default_adhesive_layer
+
+adhesive_layer = make_a1_default_adhesive_layer()
+check = A1_DEFAULT_ADHESIVE_PRIOR.zero_thickness_interface_check(max_frequency_hz=20e6)
+```
+
+A1 默认值为文献先验，不是样件实测真值：
+
+```text
+rho_adh = 1290 kg/m3
+c_adh   = 2316 m/s
+Z_adh   = 2.99 MRayl
+h_adh   = 100 um
+alpha_adh sensitivity range = 0-10000 Np/m
+```
+
+维护的建议范围为：
+
+```text
+rho_adh = 1200-1400 kg/m3
+c_adh   = 2000-2600 m/s
+Z_adh   = 2.4-3.6 MRayl
+```
+
+这些值来自 Haldren 2019 NOA 60、Mori 2019 和 Ma 2024/2026 聚合物 / 涂层参考，应写作 literature-informed polymer/adhesive priors rather than calibrated material constants。
+
+对 `h_adh = 100 um`，零厚度 `K_N` 等效界面的一阶有效频率大致为：
+
+```text
+c_adh = 2000-2600 m/s:
+r < 0.05        -> f_max < 1.0-1.3 MHz
+0.05 <= r < 0.1 -> f_max = 1.0-2.6 MHz 边界区
+r >= 0.1        -> reduced-model result
+```
+
+若取 A1 默认 `c_adh = 2316 m/s`：
+
+```text
+r < 0.05        -> f_max < 1.158 MHz
+0.05 <= r < 0.1 -> 1.158-2.316 MHz
+20 MHz          -> r = 0.864, 应标注为 reduced-model result
+```
 
 ### 1.2 再用材料构造层
 
@@ -165,6 +215,10 @@ result = stack.solve_sweep(
 
 ## 4. 代码结构
 
+- `layered1d/adhesives.py`
+  - `A1_DEFAULT_ADHESIVE_PRIOR`：A1 默认 100 um 胶层文献先验
+  - `NOA60_HALDREN_2019_PRIOR`：Haldren 2019 NOA 60 参考先验
+  - `make_a1_default_adhesive_material(...)` / `make_a1_default_adhesive_layer(...)`：复用材料和有限厚度层工厂
 - `layered1d/attenuation.py`
   - `ConstantAttenuation(alpha_np_per_m)`：常数幅值衰减规律，单位 `Np/m`
   - `PowerLawAttenuation(alpha_ref, ref_frequency_hz, power, unit)`：频率幂律幅值衰减规律，支持 `Np/m` 和 `dB/mm`
@@ -178,6 +232,8 @@ result = stack.solve_sweep(
   - `InterfaceSpring`
   - `Connectivity`
   - `LaminatedStack`
+- `layered1d/model_checks.py`
+  - `K_N` 零厚度界面适用性检查：`r = h_adh * f_max / c_adh`
 - `layered1d/solver.py`
   - `FrequencyResponseResult`
 - `examples/basic_demo.py`
@@ -190,6 +246,12 @@ result = stack.solve_sweep(
   - 旧入口提示脚本；推荐直接运行拆分后的两个衰减 demo
 - `tests/test_physics_consistency.py`
   - 物理一致性与接口兼容性测试
+- `tests/test_benchmark_regressions.py`
+  - 界面刚度极限、相位 / 群时延和独立解析公式 benchmark 测试
+- `tests/test_model_checks.py`
+  - `K_N` 零厚度界面适用性阈值和现有 `Layer` 判定测试
+- `tests/test_adhesive_priors.py`
+  - A1 默认胶层先验、NOA 60 参考先验和有效频率边界测试
 
 示例可从仓库根目录用模块方式运行：
 
@@ -206,7 +268,7 @@ python -m examples.power_law_attenuation_demo
 运行：
 
 ```bash
-python -m unittest discover -s tests -v
+.\scripts\test.ps1
 ```
 
 当前测试应覆盖：
@@ -232,6 +294,14 @@ python -m unittest discover -s tests -v
 - 半空间介质非法输入、速度别名冲突和阻抗不一致校验
 - `Layer` 厚度、material / legacy 参数互斥、`wave_speed` legacy alias 警告和边界阻抗参数校验
 - 零入射振幅下输入阻抗返回无穷大的边界情况
+- 界面刚度 `K_interface -> infinity` 时向刚性连接参考收敛
+- 界面刚度 `K_interface -> 0` 时向脱开 / 自由界面参考收敛
+- 单层与双层结构的 `R(f)` 与手写 transfer matrix / 声阻抗递推公式一致
+- unwrap phase 在非极点 / 非共振窗口处连续
+- group delay 主峰对应半波共振 / 反共振附近
+- `K_N` 零厚度界面适用性指标 `h_adh * f_max / c_adh` 的阈值判定
+- 对现有 `Layer` 按厚度、纵波声速和最高频率判定是否只能作为 reduced-model result
+- A1 默认 100 um 胶层先验参数、`Material/Layer` 工厂和 20 MHz 下 reduced-model 判定
 
 ---
 
@@ -246,12 +316,29 @@ python -m unittest discover -s tests -v
 - 左右半空间阻抗端接
 - 经验型层内传播衰减，可为常数或频率幂律，通过复波数 `k = omega/c - j alpha(f)` 引入
 
+零厚度界面模型 `K_N` 是等效近似，不是有限厚度胶层传播模型。解释结果前应估计：
+
+```text
+r = h_adh * f_max / c_adh
+```
+
+其中 `h_adh` 是胶层或等效界面层厚度，`f_max` 是使用频带最高频率，`c_adh` 是胶层纵波声速。暂定解释：
+
+- `r < 0.05`：零厚度 `K_N` 等效界面近似通常可以作为一阶模型使用
+- `0.05 <= r < 0.1`：属于边界情况，后续应做敏感性检查
+- `r >= 0.1`：零厚度界面近似可能引入明显相位误差，当前结果应标注为 reduced-model result
+
+`1 cm` / `2 cm` 量级的实体层不是零厚度界面，仍应作为有限厚度传播层或半空间端接处理。当前 `K_N` 是等效界面参数，其可靠性受 `h_adh f_max / c_adh` 控制。
+
+可用 `layered1d.model_checks.check_layer_as_zero_thickness_interface(layer, max_frequency_hz)` 对现有 `Layer` 直接做这个判定。该检查只用于模型适用性标注，不会把有限厚度层转换为界面弹簧。
+
 因此它不是：
 
 - 导波色散模型
 - 任意角入射模型
 - 含剪切、模态转换、各向异性板理论的完整模型
 - 含换能器、耦合层、电学链条的完整测量模型
+- 显式 adhesive layer / finite glue layer 传播模型
 - 复模量、频散、界面阻尼或 Biot 多孔介质耗散模型
 
 ---

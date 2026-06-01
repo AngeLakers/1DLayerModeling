@@ -36,7 +36,7 @@
 - 当前验证通过：
 
 ```bash
-python -m unittest discover -s tests -v
+.\scripts\test.ps1
 ```
 
 ## v1.2.1

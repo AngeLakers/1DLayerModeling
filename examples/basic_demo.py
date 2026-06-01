@@ -10,13 +10,17 @@ from layered1d.materials import Material
 
 
 def main() -> None:
-    aluminum = Material(density=2700.0, young_modulus=70e9, name="Aluminum", poisson_ratio=0.33)
+    aluminum = Material(
+        density=2700.0,
+        young_modulus=70e9,
+        name="Aluminum",
+        poisson_ratio=0.33,
+    )
     polymer = Material(
         density=1200.0,
         young_modulus=3.0e9,
         name="Polymer",
         poisson_ratio=0.40,
-        notes="Current isotropic-solid material model uses density, young_modulus, and poisson_ratio.",
     )
 
     layers = [
@@ -34,7 +38,7 @@ def main() -> None:
     left_medium = HalfSpaceMedium(density=1000.0, longitudinal_wave_speed=1480.0, name="Water")
     right_medium = HalfSpaceMedium(density=7850.0, longitudinal_wave_speed=5900.0, name="Steel")
 
-    freqs = np.arange(0.1e6, 2.5e6 + 1.0e3, 1.0e3)
+    freqs = np.arange(0.1e6, 20.0e6 + 2.5e3, 2.5e3)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(__file__).resolve().parent / "outputs" / timestamp

@@ -82,7 +82,12 @@ class HalfSpaceMedium:
 
     @property
     def wave_speed(self) -> Optional[float]:
-        # Backward-compatible alias. Prefer longitudinal_wave_speed.
+        warnings.warn(
+            "HalfSpaceMedium.wave_speed is a compatibility alias; "
+            "prefer longitudinal_wave_speed.",
+            FutureWarning,
+            stacklevel=2,
+        )
         return self.longitudinal_wave_speed
 
     @classmethod

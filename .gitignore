@@ -2,3 +2,10 @@ __pycache__/
 *.py[cod]
 .coverage
 .pytest_cache/
+.idea/
+*.egg-info/
+examples/outputs/
+/input_impedance_comparison.png
+/reflection_magnitude_comparison.png
+/examples/input_impedance_comparison.png
+/examples/reflection_magnitude_comparison.png

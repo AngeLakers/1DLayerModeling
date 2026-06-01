@@ -133,7 +133,11 @@ class Layer:
 
     @property
     def wave_speed(self) -> float:
-        # Backward-compatible alias. Prefer longitudinal_wave_speed.
+        warnings.warn(
+            "Layer.wave_speed is a compatibility alias; prefer longitudinal_wave_speed.",
+            FutureWarning,
+            stacklevel=2,
+        )
         return self.longitudinal_wave_speed
 
     @property
@@ -141,7 +145,12 @@ class Layer:
         return self.material.impedance
 
     def wavenumber(self, omega: float) -> complex:
-        return omega / self.longitudinal_wave_speed
+        if not math.isfinite(omega) or omega < 0:
+            raise ValueError("omega must be finite and non-negative.")
+        k_real = omega / self.longitudinal_wave_speed
+        frequency_hz = omega / (2.0 * math.pi)
+        alpha = self.material.attenuation_np_per_m(frequency_hz)
+        return complex(k_real, -alpha)
 
     def dynamic_stiffness(self, omega: float) -> np.ndarray:
         k = self.wavenumber(omega)
@@ -161,12 +170,12 @@ class Layer:
 
     def q_from_amplitudes(self, omega: float, a_plus: complex, a_minus: complex) -> np.ndarray:
         k = self.wavenumber(omega)
-        e = np.exp(1j * k * self.thickness)
+        e = np.exp(-1j * k * self.thickness)
         return np.array([a_plus + a_minus, a_plus * e + a_minus / e], dtype=complex)
 
     def amplitudes_from_boundary_displacements(self, omega: float, u_left: complex, u_right: complex) -> Tuple[complex, complex]:
         k = self.wavenumber(omega)
-        e = np.exp(1j * k * self.thickness)
+        e = np.exp(-1j * k * self.thickness)
         d = np.array([[1.0, 1.0], [e, 1.0 / e]], dtype=complex)
         a_plus, a_minus = np.linalg.solve(d, np.array([u_left, u_right], dtype=complex))
         return a_plus, a_minus
@@ -176,10 +185,10 @@ class Layer:
         k = self.wavenumber(omega)
         z = self.impedance
         z_local = np.asarray(z_local, dtype=float)
-        phase_p = np.exp(1j * k * z_local)
-        phase_m = np.exp(-1j * k * z_local)
+        phase_p = np.exp(-1j * k * z_local)
+        phase_m = np.exp(1j * k * z_local)
         u = a_plus * phase_p + a_minus * phase_m
-        sigma = 1j * omega * z * (a_plus * phase_p - a_minus * phase_m)
+        sigma = -1j * omega * z * (a_plus * phase_p - a_minus * phase_m)
         velocity = -1j * omega * u
         return {
             "z": z_local,

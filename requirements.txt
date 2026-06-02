@@ -2,10 +2,10 @@
 numpy>=1.24
 matplotlib>=3.7
 
-# Development and testing dependencies
+# Build dependencies
 setuptools>=68
 wheel
 
-# Optional: for better development experience
-pytest>=7.0  # Modern test runner (optional, unittest is built-in)
+# Testing dependencies required to run the full test suite
+pytest>=7.0
 

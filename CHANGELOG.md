@@ -1,5 +1,73 @@
 # Changelog
 
+## Unreleased
+
+基于 `v1.2.2-1`，补齐测试运行依赖和边界校验覆盖。
+
+### Added
+
+- 新增 `tests/test_validation_edges.py`，覆盖输入校验和防御性分支：
+  - `AdhesiveLayerPrior` 非法标量、非法区间、越界泊松比和负适用性比例
+  - `ConstantAttenuation.alpha(omega)` 负角频率
+  - `Material` 非法材料参数、非法衰减入口和衰减规律返回负值 / NaN
+  - `HalfSpaceMedium` 必填和可选密度 / 纵波速度校验
+  - `Layer` legacy 构造器不可转换泊松比
+  - `LaminatedStack` 接口数量校验和 `FrequencyResponseResult.layer_field(...)` 形状稳定性
+- `requirements.txt` 明确 `pytest>=7.0` 是运行完整测试套件的必需依赖。
+
+### Changed
+
+- `requirements.txt` 将构建依赖和测试依赖拆分说明，避免把 `pytest` 记录为可选开发体验。
+
+### Removed
+
+- 移除 `requirements.txt` 中 `pytest` 可选依赖的说明。
+
+### Validation
+
+- 当前验证通过：
+
+```bash
+conda activate multilayer_model
+python -m pytest
+```
+
+## v1.2.2-1
+
+基于 `v1.2.2`，新增 benchmark、胶层先验和零厚度界面适用性检查。
+
+### Added
+
+- 新增 `layered1d/adhesives.py`：
+  - `AdhesiveLayerPrior` 可复用胶层 / 聚合物层文献先验
+  - `A1_DEFAULT_ADHESIVE_PRIOR` 和 `NOA60_HALDREN_2019_PRIOR`
+  - A1 默认胶层 `Material` / `Layer` 工厂函数
+- 新增 `layered1d/model_checks.py`：
+  - `zero_thickness_interface_ratio(...)`
+  - `classify_zero_thickness_interface_ratio(...)`
+  - `check_zero_thickness_interface_applicability(...)`
+  - `check_layer_as_zero_thickness_interface(...)`
+- 新增 `scripts/test.ps1`，统一执行项目测试。
+- 新增 benchmark 和模型检查测试：
+  - `tests/test_adhesive_priors.py`
+  - `tests/test_benchmark_regressions.py`
+  - `tests/test_model_checks.py`
+
+### Changed
+
+- README 补充胶层先验、零厚度 `K_N` 适用性阈值、reduced-model 判定和标准测试流程。
+- `layered1d.__init__` 导出胶层先验和模型检查 API。
+- `CHANGELOG.md` 的验证命令从直接调用 `unittest` 改为 `.\scripts\test.ps1`。
+
+### Validation
+
+- 新增和扩展测试覆盖：
+  - transfer-matrix 和 acoustic-impedance benchmark 对照
+  - 界面刚度刚接 / 自由界面极限
+  - phase unwrap 和 group-delay 回归
+  - 既有 `Layer` 的零厚度界面适用性判定
+  - A1 默认胶层和 NOA60 文献先验
+
 ## v1.2.2
 
 基于 `v1.2.1`，主要加入层内衰减模型，并重新整理 demo 结构。
